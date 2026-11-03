@@ -28,8 +28,30 @@ module.exports = {
   ARBITRAGE: {
     MIN_PROFIT_PERCENT: 0.30,
     MAX_SPREAD_PERCENT: 10,
+
+    // Taxa padrão de contingência.
     TRADING_FEE_PERCENT: 0.10,
+
+    // Preencher com taxas taker efetivas das contas.
+    // Valores em porcentagem, não em fração.
+    EXCHANGE_TAKER_FEES_PERCENT: {},
+
     INITIAL_BALANCE: 1000
+  },
+
+  SIMULATION: {
+    TRADE_BUDGET_BRL: 100,
+
+    ORDERBOOK_DEPTH: 50,
+    ORDERBOOK_MAX_AGE_MS: 15000,
+
+    MAX_CANDIDATES_TO_VALIDATE: 30,
+
+    MAX_SLIPPAGE_PERCENT: 1.0,
+
+    MIN_BUDGET_FILL_RATIO: 0.98,
+
+    MIN_NET_PROFIT_BRL: 0.10
   },
 
   MODES: {
