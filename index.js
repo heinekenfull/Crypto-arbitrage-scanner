@@ -3,6 +3,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const config = require('./config');
 
@@ -15,23 +16,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ======================================
+// INTERFACE DO SITE
+// ======================================
+
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ======================================
+// CONTROLE DO SCANNER
+// ======================================
+
 let lastScan = null;
 let scanning = false;
 
-app.get('/', (req, res) => {
-  res.json({
-    name: 'Crypto Arbitrage Scanner',
-    version: '1.0.0',
-    status: 'online',
-    modes: {
-      spot: true,
-      futures: true,
-      dex: true,
-      simulation: true,
-      liveTrading: false
-    }
-  });
-});
+// ======================================
+// STATUS DO SERVIDOR
+// ======================================
 
 app.get('/health', (req, res) => {
   res.json({
@@ -41,6 +41,10 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ======================================
+// STATUS DO SISTEMA
+// ======================================
+
 app.get('/api/status', (req, res) => {
   res.json({
     status: 'online',
@@ -49,36 +53,44 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// ======================================
+// OPORTUNIDADES
+// ======================================
+
 app.get('/api/opportunities', async (req, res) => {
-  try {
-    if (scanning) {
-      if (lastScan) {
-        return res.json(lastScan);
-      }
-
-      return res.status(503).json({
-        error: 'Primeira leitura em andamento'
-      });
+  if (scanning) {
+    if (lastScan) {
+      return res.json(lastScan);
     }
 
-    scanning = true;
-
-    try {
-      lastScan = await scanMarket();
-      res.json(lastScan);
-    } finally {
-      scanning = false;
-    }
-
-  } catch (error) {
-    scanning = false;
-
-    res.status(500).json({
-      error: 'Erro ao analisar o mercado',
-      message: error.message
+    return res.status(503).json({
+      error: 'Primeira consulta em andamento'
     });
   }
+
+  scanning = true;
+
+  try {
+    lastScan = await scanMarket();
+
+    res.json(lastScan);
+
+  } catch (error) {
+    console.error('Erro no scanner:', error);
+
+    res.status(500).json({
+      error: 'Erro ao analisar mercado',
+      message: error.message
+    });
+
+  } finally {
+    scanning = false;
+  }
 });
+
+// ======================================
+// CORRETORAS
+// ======================================
 
 app.get('/api/exchanges', (req, res) => {
   res.json({
@@ -91,6 +103,10 @@ app.get('/api/exchanges', (req, res) => {
   });
 });
 
+// ======================================
+// CONFIGURAÇÕES
+// ======================================
+
 app.get('/api/config', (req, res) => {
   res.json({
     scanInterval: config.SCAN_INTERVAL,
@@ -99,9 +115,12 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-app.listen(config.PORT, () => {
+// ======================================
+// INICIALIZAÇÃO
+// ======================================
+
+app.listen(config.PORT, '0.0.0.0', () => {
   console.log(
-    `Crypto Arbitrage Scanner rodando na porta ${config.PORT}`
+    `Crypto Arbitrage Scanner online na porta ${config.PORT}`
   );
 });
-
