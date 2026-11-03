@@ -43,13 +43,18 @@ header {
 
 .container {
   padding: 20px;
-  max-width: 1400px;
+  max-width: 1500px;
   margin: auto;
 }
 
 h2 {
   margin: 20px 0 15px;
   font-size: 19px;
+}
+
+h3 {
+  font-size: 15px;
+  margin-bottom: 12px;
 }
 
 .cards {
@@ -67,6 +72,7 @@ h2 {
 
 .card small {
   color: #94a3b8;
+  display: block;
 }
 
 .card h2 {
@@ -74,23 +80,28 @@ h2 {
   margin: 12px 0 0;
 }
 
-.green {
-  color: #35d49a;
-}
-
-.yellow {
-  color: #f5c451;
-}
-
-.red {
-  color: #ff6878;
-}
+.green { color: #35d49a; }
+.yellow { color: #f5c451; }
+.red { color: #ff6878; }
+.muted { color: #94a3b8; }
 
 .controls {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   margin: 18px 0;
+  align-items: center;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.control-group label {
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 button, select {
@@ -100,6 +111,7 @@ button, select {
   border-radius: 8px;
   padding: 12px 16px;
   cursor: pointer;
+  min-height: 42px;
 }
 
 button.primary {
@@ -109,6 +121,7 @@ button.primary {
 
 button:disabled {
   opacity: .5;
+  cursor: not-allowed;
 }
 
 .panel {
@@ -120,6 +133,13 @@ button:disabled {
   overflow: hidden;
 }
 
+.panel-description {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -127,17 +147,78 @@ button:disabled {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 650px;
+  min-width: 1050px;
 }
 
 th, td {
   text-align: left;
-  padding: 14px 10px;
+  padding: 13px 10px;
   border-bottom: 1px solid #263449;
   font-size: 13px;
+  white-space: nowrap;
 }
 
 th {
+  color: #94a3b8;
+  font-weight: normal;
+}
+
+td {
+  color: #e8edf7;
+}
+
+.profit-cell {
+  color: #35d49a;
+  font-weight: bold;
+}
+
+.loss-cell {
+  color: #ff6878;
+  font-weight: bold;
+}
+
+.simulation-panel {
+  margin-top: 10px;
+  padding: 12px;
+  background: #0c1626;
+  border: 1px solid #263449;
+  border-radius: 8px;
+  min-width: 310px;
+}
+
+.simulation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.simulation-item {
+  background: #17263b;
+  border-radius: 7px;
+  padding: 9px;
+  min-width: 0;
+}
+
+.simulation-item small {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+
+.simulation-item strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.simulation-item.selected {
+  border: 1px solid #35d49a;
+}
+
+.simulation-status {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 10px;
   color: #94a3b8;
 }
 
@@ -160,6 +241,13 @@ th {
   margin-right: 5px;
 }
 
+.info-line {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
 footer {
   text-align: center;
   padding: 25px;
@@ -168,13 +256,11 @@ footer {
 }
 
 @media(max-width: 600px) {
-  .container {
-    padding: 12px;
-  }
-
-  header {
-    padding: 15px;
-  }
+  .container { padding: 12px; }
+  header { padding: 15px; }
+  .simulation-grid { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
+  .controls > * { width: 100%; }
+  .control-group select { width: 100%; }
 }
 </style>
 </head>
@@ -183,9 +269,7 @@ footer {
 
 <header>
   <div class="logo">CRYPTO RADAR</div>
-  <div class="status" id="serverStatus">
-    ● CONECTANDO...
-  </div>
+  <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
 <div class="container">
@@ -193,7 +277,6 @@ footer {
   <h2>Dashboard de Arbitragem</h2>
 
   <div class="cards">
-
     <div class="card">
       <small>Corretoras conectadas</small>
       <h2 class="green" id="exchangeCount">0</h2>
@@ -205,7 +288,7 @@ footer {
     </div>
 
     <div class="card">
-      <small>Oportunidades</small>
+      <small>Oportunidades encontradas</small>
       <h2 class="yellow" id="opportunityCount">0</h2>
     </div>
 
@@ -214,14 +297,34 @@ footer {
       <h2 class="green" id="bestProfit">0%</h2>
     </div>
 
+    <div class="card">
+      <small>Melhor lucro estimado</small>
+      <h2 class="green" id="bestProfitBRL">R$ 0,00</h2>
+    </div>
   </div>
 
   <div class="controls">
-    <select id="marketType">
-      <option value="SPOT">Spot</option>
-      <option value="FUTURES">Futuros</option>
-      <option value="DEX">DEX</option>
-    </select>
+
+    <div class="control-group">
+      <label for="budgetSelect">Capital da simulação</label>
+      <select id="budgetSelect">
+        <option value="50">US$ 50</option>
+        <option value="100" selected>US$ 100</option>
+        <option value="150">US$ 150</option>
+        <option value="250">US$ 250</option>
+        <option value="500">US$ 500</option>
+        <option value="1000">US$ 1.000</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="marketType">Modalidade</label>
+      <select id="marketType">
+        <option value="SPOT">Spot</option>
+        <option value="FUTURES">Futuros</option>
+        <option value="DEX">DEX</option>
+      </select>
+    </div>
 
     <button class="primary" id="scanButton" onclick="scan()">
       ATUALIZAR SCANNER
@@ -230,10 +333,16 @@ footer {
     <button onclick="loadExchanges()">
       CORRETORAS
     </button>
+
   </div>
 
   <div class="panel">
     <h2>Oportunidades de arbitragem</h2>
+
+    <p class="panel-description" id="budgetDescription">
+      Exibindo resultados para US$ 100.
+      As seis simulações são calculadas pelo backend usando os mesmos livros de ofertas.
+    </p>
 
     <div class="table-wrap">
       <table>
@@ -244,16 +353,30 @@ footer {
             <th>Vender</th>
             <th>Preço compra</th>
             <th>Preço venda</th>
-            <th>Lucro líquido</th>
+            <th>Capital (USD)</th>
+            <th>Lucro líquido (BRL)</th>
+            <th>Lucro (%)</th>
+            <th>Preenchimento</th>
+            <th>Detalhes</th>
           </tr>
         </thead>
 
         <tbody id="opportunityTable">
           <tr>
-            <td colspan="6">Aguardando primeira consulta...</td>
+            <td colspan="10">Aguardando primeira consulta...</td>
           </tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Comparação das seis simulações</h2>
+    <p class="panel-description">
+      Selecione uma oportunidade na tabela para comparar os seis valores.
+    </p>
+    <div id="comparisonArea" class="muted">
+      Nenhuma oportunidade selecionada.
     </div>
   </div>
 
@@ -266,8 +389,8 @@ footer {
 
   <div class="panel">
     <h2>Informações do scanner</h2>
-    <p id="lastUpdate">Aguardando atualização...</p>
-    <p id="scanMessage" style="margin-top:12px;color:#94a3b8">
+    <p class="info-line" id="lastUpdate">Aguardando atualização...</p>
+    <p class="info-line" id="scanMessage">
       Sistema de monitoramento iniciado.
     </p>
   </div>
@@ -278,15 +401,321 @@ footer {
   CRYPTO ARBITRAGE SCANNER · MODO SIMULAÇÃO
   <br><br>
   Nenhuma ordem real é executada.
+  <br>
+  Resultados estimados, sujeitos a liquidez, taxas, slippage e variação de mercado.
 </footer>
 
 <script>
 const API = window.location.origin;
 
+const BUDGETS = [50, 100, 150, 250, 500, 1000];
+
+let latestData = null;
+let selectedOpportunity = null;
+
+function numberValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function formatBRL(value) {
+  return numberValue(value).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  });
+}
+
+function formatUSD(value) {
+  return numberValue(value).toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2
+  });
+}
+
+function formatPercent(value) {
+  return numberValue(value).toFixed(3) + '%';
+}
+
+function formatPrice(value) {
+  const number = numberValue(value);
+
+  if (!number) return '-';
+
+  return number.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 8
+  });
+}
+
+function getBudget(simulation) {
+  return numberValue(
+    simulation.budgetUSD ??
+    simulation.tradeBudgetUSD ??
+    simulation.amountUSD ??
+    simulation.budget ??
+    simulation.usd
+  );
+}
+
+function getSimulation(opportunity, budget) {
+  const simulations = Array.isArray(opportunity.simulations)
+    ? opportunity.simulations
+    : [];
+
+  return simulations.find(simulation =>
+    Math.abs(getBudget(simulation) - budget) < 0.01
+  ) || null;
+}
+
+function getProfitPercent(simulation) {
+  if (!simulation) return 0;
+
+  return numberValue(
+    simulation.netProfitPercent ??
+    simulation.profitPercent ??
+    simulation.profitPercentage
+  );
+}
+
+function getProfitBRL(simulation) {
+  if (!simulation) return 0;
+
+  return numberValue(
+    simulation.netProfitBRL ??
+    simulation.profitBRL ??
+    simulation.profit
+  );
+}
+
+function isValidated(simulation) {
+  if (!simulation) return false;
+
+  return simulation.status === 'validated' ||
+         simulation.status === 'approved' ||
+         simulation.status === 'success';
+}
+
+function getFillRatio(simulation) {
+  if (!simulation) return null;
+
+  const value = simulation.fillRatio ??
+               simulation.budgetFillRatio;
+
+  if (value === undefined || value === null) return null;
+
+  const number = numberValue(value);
+
+  return number <= 1 ? number * 100 : number;
+}
+
+function createCell(value, className) {
+  const td = document.createElement('td');
+  td.textContent = value ?? '-';
+
+  if (className) td.className = className;
+
+  return td;
+}
+
+function createSimulationCard(simulation, budget, selected) {
+  const card = document.createElement('div');
+  card.className = 'simulation-item' + (selected ? ' selected' : '');
+
+  const title = document.createElement('small');
+  title.textContent = formatUSD(budget);
+
+  const profit = document.createElement('strong');
+  profit.textContent = simulation
+    ? formatBRL(getProfitBRL(simulation))
+    : 'Não disponível';
+
+  if (simulation && isValidated(simulation)) {
+    profit.className = 'green';
+  } else if (simulation) {
+    profit.className = 'yellow';
+  }
+
+  const percent = document.createElement('div');
+  percent.className = 'simulation-status';
+  percent.textContent = simulation
+    ? formatPercent(getProfitPercent(simulation)) +
+      ' · ' + (simulation.status || 'sem status')
+    : 'Sem resultado para este valor';
+
+  card.appendChild(title);
+  card.appendChild(profit);
+  card.appendChild(percent);
+
+  return card;
+}
+
+function renderComparison(opportunity) {
+  const area = document.getElementById('comparisonArea');
+  area.innerHTML = '';
+
+  if (!opportunity) {
+    area.textContent = 'Nenhuma oportunidade selecionada.';
+    return;
+  }
+
+  const heading = document.createElement('h3');
+  heading.textContent = opportunity.symbol +
+    ' — ' + opportunity.buyExchange +
+    ' → ' + opportunity.sellExchange;
+
+  const grid = document.createElement('div');
+  grid.className = 'simulation-grid';
+
+  BUDGETS.forEach(budget => {
+    const simulation = getSimulation(opportunity, budget);
+    grid.appendChild(
+      createSimulationCard(
+        simulation,
+        budget,
+        budget === numberValue(document.getElementById('budgetSelect').value)
+      )
+    );
+  });
+
+  area.appendChild(heading);
+  area.appendChild(grid);
+}
+
+function renderOpportunities() {
+  if (!latestData) return;
+
+  const budget = numberValue(
+    document.getElementById('budgetSelect').value
+  );
+
+  const opportunities = latestData.opportunities || [];
+  const table = document.getElementById('opportunityTable');
+
+  table.innerHTML = '';
+
+  document.getElementById('budgetDescription').textContent =
+    'Resultados para ' + formatUSD(budget) +
+    '. A comparação das seis simulações utiliza os resultados enviados pelo backend.';
+
+  const ranked = opportunities.map(item => {
+    const simulation = getSimulation(item, budget);
+    return { item, simulation };
+  });
+
+  ranked.sort((a, b) => {
+    return getProfitBRL(b.simulation) - getProfitBRL(a.simulation);
+  });
+
+  const available = ranked.filter(row =>
+    row.simulation && isValidated(row.simulation)
+  );
+
+  document.getElementById('opportunityCount').textContent =
+    opportunities.length;
+
+  if (available.length) {
+    const best = available[0].simulation;
+
+    document.getElementById('bestProfit').textContent =
+      formatPercent(getProfitPercent(best));
+
+    document.getElementById('bestProfitBRL').textContent =
+      formatBRL(getProfitBRL(best));
+  } else {
+    document.getElementById('bestProfit').textContent = '0%';
+    document.getElementById('bestProfitBRL').textContent = 'R$ 0,00';
+  }
+
+  if (!opportunities.length) {
+    table.innerHTML =
+      '<tr><td colspan="10">Nenhuma oportunidade encontrada nesta consulta.</td></tr>';
+
+    renderComparison(null);
+    return;
+  }
+
+  ranked.forEach(({ item, simulation }, index) => {
+    const tr = document.createElement('tr');
+
+    tr.appendChild(createCell(item.symbol));
+    tr.appendChild(createCell(item.buyExchange));
+    tr.appendChild(createCell(item.sellExchange));
+    tr.appendChild(createCell(formatPrice(item.buyPrice)));
+    tr.appendChild(createCell(formatPrice(item.sellPrice)));
+    tr.appendChild(createCell(formatUSD(budget)));
+
+    if (simulation) {
+      const profit = getProfitBRL(simulation);
+      const percent = getProfitPercent(simulation);
+      const fill = getFillRatio(simulation);
+
+      tr.appendChild(createCell(
+        formatBRL(profit),
+        isValidated(simulation) ? 'profit-cell' : 'loss-cell'
+      ));
+
+      tr.appendChild(createCell(
+        formatPercent(percent),
+        isValidated(simulation) ? 'profit-cell' : 'loss-cell'
+      ));
+
+      tr.appendChild(createCell(
+        fill === null ? '-' : fill.toFixed(2) + '%'
+      ));
+    } else {
+      tr.appendChild(createCell('Sem simulação'));
+      tr.appendChild(createCell('-'));
+      tr.appendChild(createCell('-'));
+    }
+
+    const detailCell = document.createElement('td');
+    const detailButton = document.createElement('button');
+
+    detailButton.textContent = 'VER 6 VALORES';
+    detailButton.onclick = () => {
+      selectedOpportunity = item;
+      renderComparison(item);
+      document.getElementById('comparisonArea').scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest'
+      });
+    };
+
+    detailCell.appendChild(detailButton);
+    tr.appendChild(detailCell);
+
+    table.appendChild(tr);
+
+    if (index === 0 && !selectedOpportunity) {
+      selectedOpportunity = item;
+    }
+  });
+
+  if (selectedOpportunity) {
+    const stillExists = opportunities.find(item =>
+      item.symbol === selectedOpportunity.symbol &&
+      item.buyExchange === selectedOpportunity.buyExchange &&
+      item.sellExchange === selectedOpportunity.sellExchange
+    );
+
+    if (stillExists) {
+      selectedOpportunity = stillExists;
+      renderComparison(stillExists);
+    } else {
+      selectedOpportunity = opportunities[0];
+      renderComparison(opportunities[0]);
+    }
+  }
+}
+
 async function checkServer() {
   try {
     const response = await fetch(API + '/health');
-    if (!response.ok) throw new Error('Servidor indisponível');
+
+    if (!response.ok) {
+      throw new Error('Servidor indisponível');
+    }
 
     document.getElementById('serverStatus').textContent =
       '● SERVIDOR ONLINE';
@@ -301,11 +730,13 @@ async function loadExchanges() {
 
   try {
     const response = await fetch(API + '/api/exchanges');
-    const data = await response.json();
 
+    if (!response.ok) throw new Error('Falha ao consultar corretoras');
+
+    const data = await response.json();
     container.innerHTML = '';
 
-    data.exchanges.forEach(exchange => {
+    (data.exchanges || []).forEach(exchange => {
       const item = document.createElement('div');
       item.className = 'exchange';
 
@@ -330,74 +761,56 @@ async function scan() {
   button.textContent = 'ANALISANDO...';
 
   document.getElementById('scanMessage').textContent =
-    'Consultando mercados nas corretoras...';
+    'Consultando mercados nas corretoras e validando livros de ofertas...';
 
   try {
     const response = await fetch(API + '/api/opportunities');
 
     if (!response.ok) {
-      throw new Error('Falha na consulta do scanner');
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message ||
+        errorData.error ||
+        'Falha na consulta do scanner'
+      );
     }
 
     const data = await response.json();
+    latestData = data;
+    selectedOpportunity = null;
 
-    document.getElementById('exchangeCount').textContent =
-      data.exchangesConnected || 0;
+    const exchanges = data.exchanges || [];
 
-    document.getElementById('marketCount').textContent =
-      (data.exchanges || []).reduce(
-        (total, exchange) => total + exchange.markets,
-        0
+    const connected = data.exchangesConnected ??
+      exchanges.filter(exchange =>
+        exchange.status === 'connected' ||
+        exchange.connected === true
+      ).length;
+
+    const markets = exchanges.reduce((total, exchange) => {
+      return total + numberValue(
+        exchange.markets ??
+        exchange.marketsReceived ??
+        exchange.marketsDiscovered
       );
+    }, 0);
 
-    const opportunities = data.opportunities || [];
+    document.getElementById('exchangeCount').textContent = connected;
+    document.getElementById('marketCount').textContent =
+      markets.toLocaleString('pt-BR');
 
-    document.getElementById('opportunityCount').textContent =
-      opportunities.length;
-
-    document.getElementById('bestProfit').textContent =
-      opportunities.length
-        ? opportunities[0].netProfitPercent + '%'
-        : '0%';
-
-    const table = document.getElementById('opportunityTable');
-    table.innerHTML = '';
-
-    if (!opportunities.length) {
-      table.innerHTML =
-        '<tr><td colspan="6">Nenhuma oportunidade encontrada nesta consulta.</td></tr>';
-    }
-
-    opportunities.forEach(item => {
-      const tr = document.createElement('tr');
-
-      const values = [
-        item.symbol,
-        item.buyExchange,
-        item.sellExchange,
-        Number(item.buyPrice).toFixed(6),
-        Number(item.sellPrice).toFixed(6),
-        item.netProfitPercent + '%'
-      ];
-
-      values.forEach((value, index) => {
-        const td = document.createElement('td');
-        td.textContent = value;
-
-        if (index === 5) td.className = 'green';
-
-        tr.appendChild(td);
-      });
-
-      table.appendChild(tr);
-    });
+    renderOpportunities();
 
     document.getElementById('lastUpdate').textContent =
       'Última atualização: ' + new Date().toLocaleString('pt-BR');
 
     document.getElementById('scanMessage').textContent =
-      'Consulta concluída. ' + opportunities.length +
-      ' oportunidades encontradas.';
+      'Consulta concluída. ' +
+      (data.opportunities || []).length +
+      ' oportunidades retornadas pelo backend. ' +
+      (data.validatedCount !== undefined
+        ? 'Candidatos validados no tamanho padrão: ' + data.validatedCount + '.'
+        : '');
 
   } catch (error) {
     document.getElementById('scanMessage').textContent =
@@ -407,6 +820,12 @@ async function scan() {
     button.textContent = 'ATUALIZAR SCANNER';
   }
 }
+
+document.getElementById('budgetSelect').addEventListener('change', () => {
+  if (latestData) {
+    renderOpportunities();
+  }
+});
 
 checkServer();
 loadExchanges();
