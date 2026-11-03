@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crypto Arbitrage Scanner</title>
+<title>Crypto Arbitrage Scanner 6.0</title>
 
 <style>
 * {
@@ -37,8 +37,8 @@ header {
 }
 
 .status {
-  color: #35d49a;
   font-size: 13px;
+  color: #f5c451;
 }
 
 .container {
@@ -90,7 +90,7 @@ h3 {
   gap: 10px;
   flex-wrap: wrap;
   margin: 18px 0;
-  align-items: center;
+  align-items: end;
 }
 
 .control-group {
@@ -117,6 +117,11 @@ button, select {
 button.primary {
   background: #087c60;
   border-color: #087c60;
+}
+
+button.danger {
+  background: #762c3a;
+  border-color: #a94355;
 }
 
 button:disabled {
@@ -183,7 +188,6 @@ td {
   background: #0c1626;
   border: 1px solid #263449;
   border-radius: 8px;
-  min-width: 310px;
 }
 
 .simulation-grid {
@@ -195,7 +199,7 @@ td {
 .simulation-item {
   background: #17263b;
   border-radius: 7px;
-  padding: 9px;
+  padding: 10px;
   min-width: 0;
 }
 
@@ -216,10 +220,11 @@ td {
 }
 
 .simulation-status {
-  display: inline-block;
+  display: block;
   margin-top: 6px;
   font-size: 10px;
   color: #94a3b8;
+  overflow-wrap: anywhere;
 }
 
 .exchange-list {
@@ -237,7 +242,6 @@ td {
 }
 
 .dot {
-  color: #35d49a;
   margin-right: 5px;
 }
 
@@ -246,6 +250,16 @@ td {
   font-size: 13px;
   line-height: 1.7;
   overflow-wrap: anywhere;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 4px 7px;
+  border-radius: 5px;
+  margin-top: 5px;
+  background: #263449;
+  color: #cbd5e1;
 }
 
 footer {
@@ -258,9 +272,15 @@ footer {
 @media(max-width: 600px) {
   .container { padding: 12px; }
   header { padding: 15px; }
-  .simulation-grid { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
-  .controls > * { width: 100%; }
-  .control-group select { width: 100%; }
+  .simulation-grid {
+    grid-template-columns: repeat(2, minmax(100px, 1fr));
+  }
+  .controls > * {
+    width: 100%;
+  }
+  .control-group select {
+    width: 100%;
+  }
 }
 </style>
 </head>
@@ -268,15 +288,16 @@ footer {
 <body>
 
 <header>
-  <div class="logo">CRYPTO RADAR</div>
+  <div class="logo">CRYPTO RADAR 6.0</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
 <div class="container">
 
-  <h2>Dashboard de Arbitragem</h2>
+  <h2>Dashboard de Arbitragem Spot</h2>
 
   <div class="cards">
+
     <div class="card">
       <small>Corretoras conectadas</small>
       <h2 class="green" id="exchangeCount">0</h2>
@@ -301,6 +322,7 @@ footer {
       <small>Melhor lucro estimado</small>
       <h2 class="green" id="bestProfitBRL">R$ 0,00</h2>
     </div>
+
   </div>
 
   <div class="controls">
@@ -318,16 +340,22 @@ footer {
     </div>
 
     <div class="control-group">
-      <label for="marketType">Modalidade</label>
-      <select id="marketType">
-        <option value="SPOT">Spot</option>
-        <option value="FUTURES">Futuros</option>
-        <option value="DEX">DEX</option>
+      <label>Modalidade disponível</label>
+      <select disabled>
+        <option>SPOT</option>
       </select>
     </div>
 
     <button class="primary" id="scanButton" onclick="scan()">
-      ATUALIZAR SCANNER
+      NOVA ANÁLISE
+    </button>
+
+    <button id="startButton" onclick="startScanner()">
+      INICIAR
+    </button>
+
+    <button class="danger" id="stopButton" onclick="stopScanner()">
+      PAUSAR
     </button>
 
     <button onclick="loadExchanges()">
@@ -337,14 +365,16 @@ footer {
   </div>
 
   <div class="panel">
+
     <h2>Oportunidades de arbitragem</h2>
 
     <p class="panel-description" id="budgetDescription">
-      Exibindo resultados para US$ 100.
-      As seis simulações são calculadas pelo backend usando os mesmos livros de ofertas.
+      Resultados para US$ 100.
+      As seis simulações são calculadas pelo backend.
     </p>
 
     <div class="table-wrap">
+
       <table>
         <thead>
           <tr>
@@ -353,9 +383,9 @@ footer {
             <th>Vender</th>
             <th>Preço compra</th>
             <th>Preço venda</th>
-            <th>Capital (USD)</th>
-            <th>Lucro líquido (BRL)</th>
-            <th>Lucro (%)</th>
+            <th>Capital USD</th>
+            <th>Lucro líquido BRL</th>
+            <th>Lucro %</th>
             <th>Preenchimento</th>
             <th>Detalhes</th>
           </tr>
@@ -363,36 +393,57 @@ footer {
 
         <tbody id="opportunityTable">
           <tr>
-            <td colspan="10">Aguardando primeira consulta...</td>
+            <td colspan="10">
+              Aguardando primeira consulta...
+            </td>
           </tr>
         </tbody>
       </table>
+
     </div>
+
   </div>
 
   <div class="panel">
+
     <h2>Comparação das seis simulações</h2>
+
     <p class="panel-description">
-      Selecione uma oportunidade na tabela para comparar os seis valores.
+      Selecione uma oportunidade para comparar os seis valores.
     </p>
+
     <div id="comparisonArea" class="muted">
       Nenhuma oportunidade selecionada.
     </div>
+
   </div>
 
   <div class="panel">
+
     <h2>Corretoras monitoradas</h2>
+
     <div class="exchange-list" id="exchangeList">
       Carregando corretoras...
     </div>
+
   </div>
 
   <div class="panel">
+
     <h2>Informações do scanner</h2>
-    <p class="info-line" id="lastUpdate">Aguardando atualização...</p>
+
+    <p class="info-line" id="lastUpdate">
+      Aguardando atualização...
+    </p>
+
     <p class="info-line" id="scanMessage">
       Sistema de monitoramento iniciado.
     </p>
+
+    <p class="info-line" id="scannerState">
+      Estado do scanner: verificando...
+    </p>
+
   </div>
 
 </div>
@@ -402,10 +453,17 @@ footer {
   <br><br>
   Nenhuma ordem real é executada.
   <br>
-  Resultados estimados, sujeitos a liquidez, taxas, slippage e variação de mercado.
+  Resultados estimados, sujeitos a liquidez, taxas,
+  slippage e variação de mercado.
 </footer>
 
+
 <script>
+
+// ==========================================
+// CONFIGURAÇÃO
+// ==========================================
+
 const API = window.location.origin;
 
 const BUDGETS = [50, 100, 150, 250, 500, 1000];
@@ -413,31 +471,54 @@ const BUDGETS = [50, 100, 150, 250, 500, 1000];
 let latestData = null;
 let selectedOpportunity = null;
 
+let lastLoadedScan = null;
+let statusRequestRunning = false;
+let dataRequestRunning = false;
+
+
+// ==========================================
+// FORMATAÇÃO
+// ==========================================
+
 function numberValue(value) {
+
   const number = Number(value);
+
   return Number.isFinite(number) ? number : 0;
+
 }
 
+
 function formatBRL(value) {
+
   return numberValue(value).toLocaleString('pt-BR', {
     style: 'currency',
     currency: 'BRL'
   });
+
 }
 
+
 function formatUSD(value) {
+
   return numberValue(value).toLocaleString('en-US', {
     style: 'currency',
     currency: 'USD',
     maximumFractionDigits: 2
   });
+
 }
+
 
 function formatPercent(value) {
+
   return numberValue(value).toFixed(3) + '%';
+
 }
 
+
 function formatPrice(value) {
+
   const number = numberValue(value);
 
   if (!number) return '-';
@@ -446,9 +527,16 @@ function formatPrice(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 8
   });
+
 }
 
+
+// ==========================================
+// SIMULAÇÕES
+// ==========================================
+
 function getBudget(simulation) {
+
   return numberValue(
     simulation.budgetUSD ??
     simulation.tradeBudgetUSD ??
@@ -456,9 +544,12 @@ function getBudget(simulation) {
     simulation.budget ??
     simulation.usd
   );
+
 }
 
+
 function getSimulation(opportunity, budget) {
+
   const simulations = Array.isArray(opportunity.simulations)
     ? opportunity.simulations
     : [];
@@ -466,9 +557,12 @@ function getSimulation(opportunity, budget) {
   return simulations.find(simulation =>
     Math.abs(getBudget(simulation) - budget) < 0.01
   ) || null;
+
 }
 
+
 function getProfitPercent(simulation) {
+
   if (!simulation) return 0;
 
   return numberValue(
@@ -476,9 +570,12 @@ function getProfitPercent(simulation) {
     simulation.profitPercent ??
     simulation.profitPercentage
   );
+
 }
 
+
 function getProfitBRL(simulation) {
+
   if (!simulation) return 0;
 
   return numberValue(
@@ -486,353 +583,943 @@ function getProfitBRL(simulation) {
     simulation.profitBRL ??
     simulation.profit
   );
+
 }
+
 
 function isValidated(simulation) {
+
   if (!simulation) return false;
 
-  return simulation.status === 'validated' ||
+  return simulation.validated === true ||
+         simulation.status === 'validated' ||
          simulation.status === 'approved' ||
          simulation.status === 'success';
+
 }
 
+
 function getFillRatio(simulation) {
+
   if (!simulation) return null;
 
-  const value = simulation.fillRatio ??
-               simulation.budgetFillRatio;
+  const value =
+    simulation.fillRatio ??
+    simulation.budgetFillRatio;
 
-  if (value === undefined || value === null) return null;
+  if (value === undefined || value === null) {
+    return null;
+  }
 
   const number = numberValue(value);
 
   return number <= 1 ? number * 100 : number;
+
 }
+
+
+// ==========================================
+// ELEMENTOS DA TABELA
+// ==========================================
 
 function createCell(value, className) {
+
   const td = document.createElement('td');
+
   td.textContent = value ?? '-';
 
-  if (className) td.className = className;
+  if (className) {
+    td.className = className;
+  }
 
   return td;
+
 }
 
-function createSimulationCard(simulation, budget, selected) {
+
+// ==========================================
+// CARTÕES DE SIMULAÇÃO
+// ==========================================
+
+function createSimulationCard(
+  simulation,
+  budget,
+  selected
+) {
+
   const card = document.createElement('div');
-  card.className = 'simulation-item' + (selected ? ' selected' : '');
+
+  card.className =
+    'simulation-item' +
+    (selected ? ' selected' : '');
 
   const title = document.createElement('small');
+
   title.textContent = formatUSD(budget);
 
   const profit = document.createElement('strong');
+
   profit.textContent = simulation
     ? formatBRL(getProfitBRL(simulation))
     : 'Não disponível';
 
   if (simulation && isValidated(simulation)) {
+
     profit.className = 'green';
+
   } else if (simulation) {
+
     profit.className = 'yellow';
+
   }
 
   const percent = document.createElement('div');
+
   percent.className = 'simulation-status';
+
   percent.textContent = simulation
     ? formatPercent(getProfitPercent(simulation)) +
       ' · ' + (simulation.status || 'sem status')
-    : 'Sem resultado para este valor';
+    : 'Sem resultado';
 
   card.appendChild(title);
   card.appendChild(profit);
   card.appendChild(percent);
 
   return card;
+
 }
 
+
+// ==========================================
+// COMPARAÇÃO DE CAPITAIS
+// ==========================================
+
 function renderComparison(opportunity) {
+
   const area = document.getElementById('comparisonArea');
+
   area.innerHTML = '';
 
   if (!opportunity) {
-    area.textContent = 'Nenhuma oportunidade selecionada.';
+
+    area.textContent =
+      'Nenhuma oportunidade selecionada.';
+
     return;
+
   }
 
   const heading = document.createElement('h3');
-  heading.textContent = opportunity.symbol +
-    ' — ' + opportunity.buyExchange +
-    ' → ' + opportunity.sellExchange;
+
+  heading.textContent =
+    opportunity.symbol +
+    ' — ' +
+    opportunity.buyExchange +
+    ' → ' +
+    opportunity.sellExchange;
 
   const grid = document.createElement('div');
+
   grid.className = 'simulation-grid';
 
   BUDGETS.forEach(budget => {
-    const simulation = getSimulation(opportunity, budget);
+
+    const simulation = getSimulation(
+      opportunity,
+      budget
+    );
+
     grid.appendChild(
       createSimulationCard(
         simulation,
         budget,
-        budget === numberValue(document.getElementById('budgetSelect').value)
+        budget === numberValue(
+          document.getElementById('budgetSelect').value
+        )
       )
     );
+
   });
 
   area.appendChild(heading);
   area.appendChild(grid);
+
 }
 
+
+// ==========================================
+// RENDERIZAR OPORTUNIDADES
+// ==========================================
+
 function renderOpportunities() {
+
   if (!latestData) return;
 
   const budget = numberValue(
     document.getElementById('budgetSelect').value
   );
 
-  const opportunities = latestData.opportunities || [];
-  const table = document.getElementById('opportunityTable');
+  const opportunities =
+    Array.isArray(latestData.opportunities)
+      ? latestData.opportunities
+      : [];
+
+  const table =
+    document.getElementById('opportunityTable');
 
   table.innerHTML = '';
 
-  document.getElementById('budgetDescription').textContent =
-    'Resultados para ' + formatUSD(budget) +
-    '. A comparação das seis simulações utiliza os resultados enviados pelo backend.';
+  document.getElementById(
+    'budgetDescription'
+  ).textContent =
+    'Resultados para ' +
+    formatUSD(budget) +
+    '. Compare os seis capitais em cada oportunidade.';
 
   const ranked = opportunities.map(item => {
+
     const simulation = getSimulation(item, budget);
-    return { item, simulation };
+
+    return {
+      item,
+      simulation
+    };
+
   });
 
   ranked.sort((a, b) => {
-    return getProfitBRL(b.simulation) - getProfitBRL(a.simulation);
+
+    return getProfitBRL(b.simulation) -
+           getProfitBRL(a.simulation);
+
   });
 
-  const available = ranked.filter(row =>
-    row.simulation && isValidated(row.simulation)
-  );
+  const available = ranked.filter(row => {
 
-  document.getElementById('opportunityCount').textContent =
-    opportunities.length;
+    return row.simulation &&
+           isValidated(row.simulation);
+
+  });
+
+  document.getElementById(
+    'opportunityCount'
+  ).textContent = opportunities.length;
 
   if (available.length) {
+
     const best = available[0].simulation;
 
-    document.getElementById('bestProfit').textContent =
+    document.getElementById(
+      'bestProfit'
+    ).textContent =
       formatPercent(getProfitPercent(best));
 
-    document.getElementById('bestProfitBRL').textContent =
+    document.getElementById(
+      'bestProfitBRL'
+    ).textContent =
       formatBRL(getProfitBRL(best));
+
   } else {
-    document.getElementById('bestProfit').textContent = '0%';
-    document.getElementById('bestProfitBRL').textContent = 'R$ 0,00';
+
+    document.getElementById(
+      'bestProfit'
+    ).textContent = '0%';
+
+    document.getElementById(
+      'bestProfitBRL'
+    ).textContent = 'R$ 0,00';
+
   }
 
   if (!opportunities.length) {
+
     table.innerHTML =
-      '<tr><td colspan="10">Nenhuma oportunidade encontrada nesta consulta.</td></tr>';
+      '<tr><td colspan="10">' +
+      'Nenhuma oportunidade encontrada nesta análise.' +
+      '</td></tr>';
 
     renderComparison(null);
+
     return;
+
   }
 
-  ranked.forEach(({ item, simulation }, index) => {
+  ranked.forEach(({ item, simulation }) => {
+
     const tr = document.createElement('tr');
 
     tr.appendChild(createCell(item.symbol));
+
     tr.appendChild(createCell(item.buyExchange));
+
     tr.appendChild(createCell(item.sellExchange));
-    tr.appendChild(createCell(formatPrice(item.buyPrice)));
-    tr.appendChild(createCell(formatPrice(item.sellPrice)));
-    tr.appendChild(createCell(formatUSD(budget)));
+
+    tr.appendChild(createCell(
+      formatPrice(item.buyPrice)
+    ));
+
+    tr.appendChild(createCell(
+      formatPrice(item.sellPrice)
+    ));
+
+    tr.appendChild(createCell(
+      formatUSD(budget)
+    ));
 
     if (simulation) {
+
       const profit = getProfitBRL(simulation);
+
       const percent = getProfitPercent(simulation);
+
       const fill = getFillRatio(simulation);
+
+      const approved = isValidated(simulation);
 
       tr.appendChild(createCell(
         formatBRL(profit),
-        isValidated(simulation) ? 'profit-cell' : 'loss-cell'
+        approved ? 'profit-cell' : 'loss-cell'
       ));
 
       tr.appendChild(createCell(
         formatPercent(percent),
-        isValidated(simulation) ? 'profit-cell' : 'loss-cell'
+        approved ? 'profit-cell' : 'loss-cell'
       ));
 
       tr.appendChild(createCell(
-        fill === null ? '-' : fill.toFixed(2) + '%'
+        fill === null
+          ? '-'
+          : fill.toFixed(2) + '%'
       ));
+
     } else {
+
       tr.appendChild(createCell('Sem simulação'));
       tr.appendChild(createCell('-'));
       tr.appendChild(createCell('-'));
+
     }
 
     const detailCell = document.createElement('td');
+
     const detailButton = document.createElement('button');
 
     detailButton.textContent = 'VER 6 VALORES';
+
     detailButton.onclick = () => {
+
       selectedOpportunity = item;
+
       renderComparison(item);
-      document.getElementById('comparisonArea').scrollIntoView({
+
+      document.getElementById(
+        'comparisonArea'
+      ).scrollIntoView({
         behavior: 'smooth',
         block: 'nearest'
       });
+
     };
 
     detailCell.appendChild(detailButton);
+
     tr.appendChild(detailCell);
 
     table.appendChild(tr);
 
-    if (index === 0 && !selectedOpportunity) {
-      selectedOpportunity = item;
-    }
   });
 
   if (selectedOpportunity) {
-    const stillExists = opportunities.find(item =>
-      item.symbol === selectedOpportunity.symbol &&
-      item.buyExchange === selectedOpportunity.buyExchange &&
-      item.sellExchange === selectedOpportunity.sellExchange
-    );
+
+    const stillExists = opportunities.find(item => {
+
+      return item.symbol === selectedOpportunity.symbol &&
+             item.buyExchange === selectedOpportunity.buyExchange &&
+             item.sellExchange === selectedOpportunity.sellExchange;
+
+    });
 
     if (stillExists) {
+
       selectedOpportunity = stillExists;
+
       renderComparison(stillExists);
+
     } else {
+
       selectedOpportunity = opportunities[0];
+
       renderComparison(opportunities[0]);
+
     }
+
+  } else if (opportunities.length) {
+
+    selectedOpportunity = opportunities[0];
+
+    renderComparison(opportunities[0]);
+
   }
+
 }
 
+
+// ==========================================
+// ATUALIZAR INDICADORES
+// ==========================================
+
+function updateDashboard(data) {
+
+  const exchanges = Array.isArray(data.exchanges)
+    ? data.exchanges
+    : [];
+
+  const connected = data.exchangesConnected ??
+    exchanges.filter(exchange =>
+      exchange.connected === true ||
+      exchange.status === 'connected'
+    ).length;
+
+  const markets = data.marketsAnalyzed ??
+    exchanges.reduce((total, exchange) => {
+
+      return total + numberValue(exchange.markets);
+
+    }, 0);
+
+  document.getElementById(
+    'exchangeCount'
+  ).textContent = connected;
+
+  document.getElementById(
+    'marketCount'
+  ).textContent =
+    numberValue(markets).toLocaleString('pt-BR');
+
+}
+
+
+// ==========================================
+// CARREGAR RESULTADO
+// ==========================================
+
+function applyScanData(data) {
+
+  if (!data) return;
+
+  latestData = data;
+
+  updateDashboard(data);
+
+  renderOpportunities();
+
+  const timestamp =
+    data.lastUpdated ||
+    data.timestamp ||
+    Date.now();
+
+  document.getElementById(
+    'lastUpdate'
+  ).textContent =
+    'Última atualização: ' +
+    new Date(timestamp).toLocaleString('pt-BR');
+
+  document.getElementById(
+    'scanMessage'
+  ).textContent =
+    'Análise concluída. ' +
+    (data.opportunities || []).length +
+    ' oportunidades retornadas. ' +
+    (data.validatedCount !== undefined
+      ? data.validatedCount + ' oportunidades aprovadas.'
+      : '');
+
+}
+
+
+// ==========================================
+// STATUS DO SERVIDOR
+// ==========================================
+
 async function checkServer() {
+
   try {
+
     const response = await fetch(API + '/health');
 
     if (!response.ok) {
       throw new Error('Servidor indisponível');
     }
 
-    document.getElementById('serverStatus').textContent =
-      '● SERVIDOR ONLINE';
-  } catch (error) {
-    document.getElementById('serverStatus').textContent =
-      '● SERVIDOR OFFLINE';
-  }
-}
-
-async function loadExchanges() {
-  const container = document.getElementById('exchangeList');
-
-  try {
-    const response = await fetch(API + '/api/exchanges');
-
-    if (!response.ok) throw new Error('Falha ao consultar corretoras');
-
     const data = await response.json();
-    container.innerHTML = '';
 
-    (data.exchanges || []).forEach(exchange => {
-      const item = document.createElement('div');
-      item.className = 'exchange';
+    document.getElementById(
+      'serverStatus'
+    ).textContent = '● SERVIDOR ONLINE';
 
-      const dot = document.createElement('span');
-      dot.className = 'dot';
-      dot.textContent = exchange.enabled ? '●' : '○';
+    document.getElementById(
+      'serverStatus'
+    ).className = 'status green';
 
-      item.appendChild(dot);
-      item.appendChild(document.createTextNode(exchange.name));
+    return data;
 
-      container.appendChild(item);
-    });
   } catch (error) {
-    container.textContent = 'Erro ao carregar corretoras.';
+
+    document.getElementById(
+      'serverStatus'
+    ).textContent = '● SERVIDOR OFFLINE';
+
+    document.getElementById(
+      'serverStatus'
+    ).className = 'status red';
+
+    return null;
+
   }
+
 }
 
-async function scan() {
-  const button = document.getElementById('scanButton');
 
-  button.disabled = true;
-  button.textContent = 'ANALISANDO...';
+// ==========================================
+// ESTADO DO SCANNER
+// ==========================================
 
-  document.getElementById('scanMessage').textContent =
-    'Consultando mercados nas corretoras e validando livros de ofertas...';
+function updateScannerState(data) {
+
+  const state =
+    document.getElementById('scannerState');
+
+  const startButton =
+    document.getElementById('startButton');
+
+  const stopButton =
+    document.getElementById('stopButton');
+
+  if (data.scanning) {
+
+    state.textContent =
+      'Estado: scanner analisando os mercados...';
+
+  } else if (data.scannerRunning) {
+
+    state.textContent =
+      'Estado: scanner automático ativo.';
+
+  } else {
+
+    state.textContent =
+      'Estado: scanner pausado.';
+
+  }
+
+  startButton.disabled =
+    Boolean(data.scannerRunning);
+
+  stopButton.disabled =
+    !data.scannerRunning;
+
+}
+
+
+// ==========================================
+// VERIFICAR STATUS E NOVOS CICLOS
+// ==========================================
+
+async function refreshStatus() {
+
+  if (statusRequestRunning) return;
+
+  statusRequestRunning = true;
 
   try {
-    const response = await fetch(API + '/api/opportunities');
+
+    const response = await fetch(
+      API + '/api/status',
+      { cache: 'no-store' }
+    );
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(
-        errorData.message ||
-        errorData.error ||
-        'Falha na consulta do scanner'
-      );
+      throw new Error('Falha ao consultar status');
     }
 
     const data = await response.json();
-    latestData = data;
-    selectedOpportunity = null;
 
-    const exchanges = data.exchanges || [];
+    updateScannerState(data);
 
-    const connected = data.exchangesConnected ??
-      exchanges.filter(exchange =>
-        exchange.status === 'connected' ||
-        exchange.connected === true
-      ).length;
+    if (
+      data.scanCompletedAt &&
+      data.scanCompletedAt !== lastLoadedScan &&
+      !data.scanning
+    ) {
 
-    const markets = exchanges.reduce((total, exchange) => {
-      return total + numberValue(
-        exchange.markets ??
-        exchange.marketsReceived ??
-        exchange.marketsDiscovered
-      );
-    }, 0);
+      await loadLatestResult();
 
-    document.getElementById('exchangeCount').textContent = connected;
-    document.getElementById('marketCount').textContent =
-      markets.toLocaleString('pt-BR');
-
-    renderOpportunities();
-
-    document.getElementById('lastUpdate').textContent =
-      'Última atualização: ' + new Date().toLocaleString('pt-BR');
-
-    document.getElementById('scanMessage').textContent =
-      'Consulta concluída. ' +
-      (data.opportunities || []).length +
-      ' oportunidades retornadas pelo backend. ' +
-      (data.validatedCount !== undefined
-        ? 'Candidatos validados no tamanho padrão: ' + data.validatedCount + '.'
-        : '');
+    }
 
   } catch (error) {
-    document.getElementById('scanMessage').textContent =
-      'Erro: ' + error.message;
+
+    document.getElementById(
+      'scanMessage'
+    ).textContent =
+      'Não foi possível atualizar o status: ' +
+      error.message;
+
   } finally {
-    button.disabled = false;
-    button.textContent = 'ATUALIZAR SCANNER';
+
+    statusRequestRunning = false;
+
   }
+
 }
 
-document.getElementById('budgetSelect').addEventListener('change', () => {
+
+// ==========================================
+// CARREGAR ÚLTIMO RESULTADO
+// ==========================================
+
+async function loadLatestResult() {
+
+  if (dataRequestRunning) return;
+
+  dataRequestRunning = true;
+
+  try {
+
+    const response = await fetch(
+      API + '/api/scanner/last',
+      { cache: 'no-store' }
+    );
+
+    if (!response.ok) {
+      throw new Error('Falha ao carregar resultado');
+    }
+
+    const result = await response.json();
+
+    if (result.data) {
+
+      applyScanData(result.data);
+
+      lastLoadedScan = result.timestamp;
+
+    }
+
+  } catch (error) {
+
+    document.getElementById(
+      'scanMessage'
+    ).textContent =
+      'Erro ao carregar resultados: ' +
+      error.message;
+
+  } finally {
+
+    dataRequestRunning = false;
+
+  }
+
+}
+
+
+// ==========================================
+// NOVA ANÁLISE MANUAL
+// ==========================================
+
+async function scan() {
+
+  const button =
+    document.getElementById('scanButton');
+
+  button.disabled = true;
+
+  button.textContent = 'ANALISANDO...';
+
+  document.getElementById(
+    'scanMessage'
+  ).textContent =
+    'Solicitando nova análise dos mercados...';
+
+  try {
+
+    const response = await fetch(
+      API + '/api/scanner/scan',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        cache: 'no-store'
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+
+      throw new Error(
+        data.message ||
+        data.error ||
+        'Falha na análise'
+      );
+
+    }
+
+    applyScanData(data);
+
+    lastLoadedScan =
+      data.lastUpdated ||
+      data.timestamp ||
+      null;
+
+    document.getElementById(
+      'scanMessage'
+    ).textContent =
+      'Nova análise concluída com sucesso.';
+
+  } catch (error) {
+
+    document.getElementById(
+      'scanMessage'
+    ).textContent =
+      'Erro na análise: ' + error.message;
+
+  } finally {
+
+    button.disabled = false;
+
+    button.textContent = 'NOVA ANÁLISE';
+
+    refreshStatus();
+
+  }
+
+}
+
+
+// ==========================================
+// INICIAR SCANNER
+// ==========================================
+
+async function startScanner() {
+
+  const button =
+    document.getElementById('startButton');
+
+  button.disabled = true;
+
+  try {
+
+    const response = await fetch(
+      API + '/api/scanner/start',
+      { method: 'POST' }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Falha ao iniciar');
+    }
+
+    document.getElementById(
+      'scanMessage'
+    ).textContent =
+      data.message || 'Scanner iniciado.';
+
+    await refreshStatus();
+
+  } catch (error) {
+
+    document.getElementById(
+      'scanMessage'
+    ).textContent =
+      'Erro ao iniciar scanner: ' + error.message;
+
+  } finally {
+
+    button.disabled = false;
+
+  }
+
+}
+
+
+// ==========================================
+// PAUSAR SCANNER
+// ==========================================
+
+async function stopScanner() {
+
+  const button =
+    document.getElementById('stopButton');
+
+  button.disabled = true;
+
+  try {
+
+    const response = await fetch(
+      API + '/api/scanner/stop',
+      { method: 'POST' }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Falha ao pausar');
+    }
+
+    document.getElementById(
+      'scanMessage'
+    ).textContent =
+      data.message || 'Scanner pausado.';
+
+    await refreshStatus();
+
+  } catch (error) {
+
+    document.getElementById(
+      'scanMessage'
+    ).textContent =
+      'Erro ao pausar scanner: ' + error.message;
+
+  } finally {
+
+    button.disabled = false;
+
+  }
+
+}
+
+
+// ==========================================
+// LISTA DE CORRETORAS
+// ==========================================
+
+async function loadExchanges() {
+
+  const container =
+    document.getElementById('exchangeList');
+
+  try {
+
+    const response = await fetch(
+      API + '/api/exchanges',
+      { cache: 'no-store' }
+    );
+
+    if (!response.ok) {
+      throw new Error('Falha ao consultar corretoras');
+    }
+
+    const data = await response.json();
+
+    container.innerHTML = '';
+
+    (data.exchanges || []).forEach(exchange => {
+
+      const item = document.createElement('div');
+
+      item.className = 'exchange';
+
+      const dot = document.createElement('span');
+
+      dot.className = 'dot';
+
+      if (!exchange.enabled) {
+
+        dot.classList.add('muted');
+
+        dot.textContent = '○';
+
+      } else if (exchange.connected) {
+
+        dot.classList.add('green');
+
+        dot.textContent = '●';
+
+      } else {
+
+        dot.classList.add('yellow');
+
+        dot.textContent = '●';
+
+      }
+
+      item.appendChild(dot);
+
+      item.appendChild(
+        document.createTextNode(exchange.name)
+      );
+
+      const details = document.createElement('div');
+
+      details.className = 'simulation-status';
+
+      details.textContent =
+        !exchange.enabled
+          ? 'Desativada'
+          : exchange.connected
+            ? 'Conectada'
+            : exchange.status || 'Aguardando consulta';
+
+      item.appendChild(details);
+
+      container.appendChild(item);
+
+    });
+
+  } catch (error) {
+
+    container.textContent =
+      'Erro ao carregar corretoras.';
+
+  }
+
+}
+
+
+// ==========================================
+// MUDANÇA DE CAPITAL
+// ==========================================
+
+document.getElementById(
+  'budgetSelect'
+).addEventListener('change', () => {
+
   if (latestData) {
     renderOpportunities();
   }
+
 });
 
-checkServer();
-loadExchanges();
-scan();
 
-setInterval(checkServer, 15000);
-setInterval(loadExchanges, 60000);
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+
+  await checkServer();
+
+  await loadExchanges();
+
+  await refreshStatus();
+
+  await loadLatestResult();
+
+  // Atualiza o status periodicamente.
+  // Só carrega os resultados quando um novo ciclo termina.
+
+  setInterval(refreshStatus, 3000);
+
+  setInterval(checkServer, 15000);
+
+  setInterval(loadExchanges, 60000);
+
+}
+
+initialize();
+
 </script>
 
 </body>
