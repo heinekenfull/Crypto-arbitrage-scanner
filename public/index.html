@@ -1,0 +1,420 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crypto Arbitrage Scanner</title>
+
+<style>
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #080d18;
+  color: #e8edf7;
+  font-family: Arial, sans-serif;
+}
+
+header {
+  padding: 20px;
+  background: #101827;
+  border-bottom: 1px solid #263449;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.logo {
+  font-size: 21px;
+  font-weight: bold;
+  color: #35d49a;
+}
+
+.status {
+  color: #35d49a;
+  font-size: 13px;
+}
+
+.container {
+  padding: 20px;
+  max-width: 1400px;
+  margin: auto;
+}
+
+h2 {
+  margin: 20px 0 15px;
+  font-size: 19px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  background: #111c2d;
+  border: 1px solid #263449;
+  padding: 18px;
+  border-radius: 12px;
+}
+
+.card small {
+  color: #94a3b8;
+}
+
+.card h2 {
+  font-size: 25px;
+  margin: 12px 0 0;
+}
+
+.green {
+  color: #35d49a;
+}
+
+.yellow {
+  color: #f5c451;
+}
+
+.red {
+  color: #ff6878;
+}
+
+.controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 18px 0;
+}
+
+button, select {
+  background: #17263b;
+  color: white;
+  border: 1px solid #354761;
+  border-radius: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+
+button.primary {
+  background: #087c60;
+  border-color: #087c60;
+}
+
+button:disabled {
+  opacity: .5;
+}
+
+.panel {
+  background: #111c2d;
+  border: 1px solid #263449;
+  border-radius: 12px;
+  padding: 18px;
+  margin-top: 18px;
+  overflow: hidden;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 650px;
+}
+
+th, td {
+  text-align: left;
+  padding: 14px 10px;
+  border-bottom: 1px solid #263449;
+  font-size: 13px;
+}
+
+th {
+  color: #94a3b8;
+}
+
+.exchange-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.exchange {
+  padding: 13px;
+  background: #17263b;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.dot {
+  color: #35d49a;
+  margin-right: 5px;
+}
+
+footer {
+  text-align: center;
+  padding: 25px;
+  color: #718096;
+  font-size: 12px;
+}
+
+@media(max-width: 600px) {
+  .container {
+    padding: 12px;
+  }
+
+  header {
+    padding: 15px;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="logo">CRYPTO RADAR</div>
+  <div class="status" id="serverStatus">
+    ● CONECTANDO...
+  </div>
+</header>
+
+<div class="container">
+
+  <h2>Dashboard de Arbitragem</h2>
+
+  <div class="cards">
+
+    <div class="card">
+      <small>Corretoras conectadas</small>
+      <h2 class="green" id="exchangeCount">0</h2>
+    </div>
+
+    <div class="card">
+      <small>Mercados analisados</small>
+      <h2 id="marketCount">0</h2>
+    </div>
+
+    <div class="card">
+      <small>Oportunidades</small>
+      <h2 class="yellow" id="opportunityCount">0</h2>
+    </div>
+
+    <div class="card">
+      <small>Melhor lucro líquido</small>
+      <h2 class="green" id="bestProfit">0%</h2>
+    </div>
+
+  </div>
+
+  <div class="controls">
+    <select id="marketType">
+      <option value="SPOT">Spot</option>
+      <option value="FUTURES">Futuros</option>
+      <option value="DEX">DEX</option>
+    </select>
+
+    <button class="primary" id="scanButton" onclick="scan()">
+      ATUALIZAR SCANNER
+    </button>
+
+    <button onclick="loadExchanges()">
+      CORRETORAS
+    </button>
+  </div>
+
+  <div class="panel">
+    <h2>Oportunidades de arbitragem</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Moeda</th>
+            <th>Comprar</th>
+            <th>Vender</th>
+            <th>Preço compra</th>
+            <th>Preço venda</th>
+            <th>Lucro líquido</th>
+          </tr>
+        </thead>
+
+        <tbody id="opportunityTable">
+          <tr>
+            <td colspan="6">Aguardando primeira consulta...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Corretoras monitoradas</h2>
+    <div class="exchange-list" id="exchangeList">
+      Carregando corretoras...
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Informações do scanner</h2>
+    <p id="lastUpdate">Aguardando atualização...</p>
+    <p id="scanMessage" style="margin-top:12px;color:#94a3b8">
+      Sistema de monitoramento iniciado.
+    </p>
+  </div>
+
+</div>
+
+<footer>
+  CRYPTO ARBITRAGE SCANNER · MODO SIMULAÇÃO
+  <br><br>
+  Nenhuma ordem real é executada.
+</footer>
+
+<script>
+const API = window.location.origin;
+
+async function checkServer() {
+  try {
+    const response = await fetch(API + '/health');
+    if (!response.ok) throw new Error('Servidor indisponível');
+
+    document.getElementById('serverStatus').textContent =
+      '● SERVIDOR ONLINE';
+  } catch (error) {
+    document.getElementById('serverStatus').textContent =
+      '● SERVIDOR OFFLINE';
+  }
+}
+
+async function loadExchanges() {
+  const container = document.getElementById('exchangeList');
+
+  try {
+    const response = await fetch(API + '/api/exchanges');
+    const data = await response.json();
+
+    container.innerHTML = '';
+
+    data.exchanges.forEach(exchange => {
+      const item = document.createElement('div');
+      item.className = 'exchange';
+
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.textContent = exchange.enabled ? '●' : '○';
+
+      item.appendChild(dot);
+      item.appendChild(document.createTextNode(exchange.name));
+
+      container.appendChild(item);
+    });
+  } catch (error) {
+    container.textContent = 'Erro ao carregar corretoras.';
+  }
+}
+
+async function scan() {
+  const button = document.getElementById('scanButton');
+
+  button.disabled = true;
+  button.textContent = 'ANALISANDO...';
+
+  document.getElementById('scanMessage').textContent =
+    'Consultando mercados nas corretoras...';
+
+  try {
+    const response = await fetch(API + '/api/opportunities');
+
+    if (!response.ok) {
+      throw new Error('Falha na consulta do scanner');
+    }
+
+    const data = await response.json();
+
+    document.getElementById('exchangeCount').textContent =
+      data.exchangesConnected || 0;
+
+    document.getElementById('marketCount').textContent =
+      (data.exchanges || []).reduce(
+        (total, exchange) => total + exchange.markets,
+        0
+      );
+
+    const opportunities = data.opportunities || [];
+
+    document.getElementById('opportunityCount').textContent =
+      opportunities.length;
+
+    document.getElementById('bestProfit').textContent =
+      opportunities.length
+        ? opportunities[0].netProfitPercent + '%'
+        : '0%';
+
+    const table = document.getElementById('opportunityTable');
+    table.innerHTML = '';
+
+    if (!opportunities.length) {
+      table.innerHTML =
+        '<tr><td colspan="6">Nenhuma oportunidade encontrada nesta consulta.</td></tr>';
+    }
+
+    opportunities.forEach(item => {
+      const tr = document.createElement('tr');
+
+      const values = [
+        item.symbol,
+        item.buyExchange,
+        item.sellExchange,
+        Number(item.buyPrice).toFixed(6),
+        Number(item.sellPrice).toFixed(6),
+        item.netProfitPercent + '%'
+      ];
+
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+
+        if (index === 5) td.className = 'green';
+
+        tr.appendChild(td);
+      });
+
+      table.appendChild(tr);
+    });
+
+    document.getElementById('lastUpdate').textContent =
+      'Última atualização: ' + new Date().toLocaleString('pt-BR');
+
+    document.getElementById('scanMessage').textContent =
+      'Consulta concluída. ' + opportunities.length +
+      ' oportunidades encontradas.';
+
+  } catch (error) {
+    document.getElementById('scanMessage').textContent =
+      'Erro: ' + error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ATUALIZAR SCANNER';
+  }
+}
+
+checkServer();
+loadExchanges();
+scan();
+
+setInterval(checkServer, 15000);
+setInterval(loadExchanges, 60000);
+</script>
+
+</body>
+</html>
