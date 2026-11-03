@@ -32,7 +32,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const PORT = config.PORT || 3000;
 
 // ==========================================
-// ESTADO DO SERVIDOR E SCANNER
+// ESTADO DO SCANNER
 // ==========================================
 
 let lastScan = null;
@@ -52,14 +52,18 @@ let nextScanTimer = null;
 
 
 // ==========================================
-// EXECUTAR ANÁLISE
+// EXECUÇÃO CONTROLADA
 // ==========================================
 
 async function executeScan() {
 
+  // Evita duas análises simultâneas.
+
   if (scanning && currentScanPromise) {
     return currentScanPromise;
   }
+
+  // Evita disputar requisições com o diagnóstico.
 
   if (diagnosticRunning) {
     throw new Error(
@@ -314,25 +318,17 @@ app.get('/api/opportunities', async (req, res) => {
 
     if (scanning && currentScanPromise) {
 
-      // Aguarda a análise em andamento.
-
       result = await currentScanPromise;
 
     } else if (!lastScan) {
-
-      // Primeira consulta.
 
       result = await executeScan();
 
     } else {
 
-      // Retorna o último resultado completo.
-
       result = lastScan;
 
     }
-
-    const now = Date.now();
 
     res.json({
 
@@ -345,7 +341,7 @@ app.get('/api/opportunities', async (req, res) => {
       lastUpdated: scanCompletedAt,
 
       scanAgeMs: scanCompletedAt
-        ? now - scanCompletedAt
+        ? Date.now() - scanCompletedAt
         : null,
 
       lastScanError
@@ -376,12 +372,57 @@ app.get('/api/opportunities', async (req, res) => {
 
 
 // ==========================================
+// FORÇAR NOVA ANÁLISE MANUAL
+// ==========================================
+
+app.post('/api/scanner/scan', async (req, res) => {
+
+  try {
+
+    const result = await executeScan();
+
+    res.json({
+
+      ...result,
+
+      scannerRunning,
+
+      scanning,
+
+      lastUpdated: scanCompletedAt,
+
+      lastScanError
+
+    });
+
+  } catch (error) {
+
+    res.status(503).json({
+
+      error: 'Falha ao executar nova análise',
+
+      message: error.message,
+
+      opportunities: [],
+
+      scannerRunning,
+
+      scanning,
+
+      lastScanError
+
+    });
+
+  }
+
+});
+
+
+// ==========================================
 // DIAGNÓSTICO DAS CORRETORAS
 // ==========================================
 
 app.get('/api/diagnostico', async (req, res) => {
-
-  // Impede diagnóstico simultâneo.
 
   if (diagnosticRunning) {
 
@@ -394,8 +435,6 @@ app.get('/api/diagnostico', async (req, res) => {
     });
 
   }
-
-  // Não disputa requisições com o scanner.
 
   if (scanning) {
 
