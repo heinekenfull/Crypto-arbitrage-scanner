@@ -4,7 +4,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const ccxt = require('ccxt');
 
 const config = require('./config');
 
@@ -13,6 +12,11 @@ const {
   fetchExchangePrices,
   mapWithConcurrency
 } = require('./scanner');
+
+const {
+  getSupportedExchanges,
+  getEnabledExchanges
+} = require('./exchanges');
 
 const app = express();
 
@@ -28,15 +32,17 @@ app.use(express.static(path.join(__dirname, 'public')));
 const PORT = config.PORT || 3000;
 
 // ==========================================
-// ESTADO DO SCANNER
+// ESTADO DO SERVIDOR E SCANNER
 // ==========================================
 
 let lastScan = null;
+
 let scanning = false;
 let scannerRunning = true;
 let diagnosticRunning = false;
 
 let currentScanPromise = null;
+
 let lastScanError = null;
 
 let scanStartedAt = null;
@@ -44,14 +50,21 @@ let scanCompletedAt = null;
 
 let nextScanTimer = null;
 
+
 // ==========================================
-// EXECUÇÃO CONTROLADA DO SCANNER
+// EXECUTAR ANÁLISE
 // ==========================================
 
 async function executeScan() {
 
   if (scanning && currentScanPromise) {
     return currentScanPromise;
+  }
+
+  if (diagnosticRunning) {
+    throw new Error(
+      'Diagnóstico das corretoras em andamento.'
+    );
   }
 
   scanning = true;
@@ -62,11 +75,14 @@ async function executeScan() {
 
     try {
 
-      console.log('[SCANNER] Iniciando análise Spot...');
+      console.log(
+        '[SCANNER] Iniciando análise Spot...'
+      );
 
       const result = await scanMarket();
 
       lastScan = result;
+
       scanCompletedAt = Date.now();
 
       console.log(
@@ -81,11 +97,12 @@ async function executeScan() {
 
     } catch (error) {
 
-      lastScanError = error.message;
+      lastScanError =
+        error.message || String(error);
 
       console.error(
         '[SCANNER] Erro:',
-        error.message
+        lastScanError
       );
 
       throw error;
@@ -100,6 +117,7 @@ async function executeScan() {
   })();
 
   return currentScanPromise;
+
 }
 
 
@@ -117,25 +135,38 @@ function scheduleNextScan() {
 
   nextScanTimer = setTimeout(async () => {
 
-    if (!scanning) {
+    nextScanTimer = null;
+
+    if (!scanning && !diagnosticRunning) {
 
       try {
+
         await executeScan();
+
       } catch (error) {
+
         console.error(
           '[SCANNER] Falha no ciclo:',
           error.message
         );
+
       }
 
     }
 
     scheduleNextScan();
 
-  }, config.SCAN_INTERVAL || 5000);
+  }, Math.max(
+    1000,
+    Number(config.SCAN_INTERVAL) || 5000
+  ));
 
 }
 
+
+// ==========================================
+// INICIAR SCANNER
+// ==========================================
 
 async function startScanner() {
 
@@ -145,7 +176,14 @@ async function startScanner() {
 
   scannerRunning = true;
 
-  console.log('[SCANNER] Inicializando scanner automático...');
+  console.log(
+    '[SCANNER] Inicializando scanner automático...'
+  );
+
+  if (diagnosticRunning) {
+    scheduleNextScan();
+    return;
+  }
 
   try {
 
@@ -165,16 +203,25 @@ async function startScanner() {
 }
 
 
+// ==========================================
+// PAUSAR SCANNER
+// ==========================================
+
 function stopScanner() {
 
   scannerRunning = false;
 
   if (nextScanTimer) {
+
     clearTimeout(nextScanTimer);
+
     nextScanTimer = null;
+
   }
 
-  console.log('[SCANNER] Scanner pausado.');
+  console.log(
+    '[SCANNER] Scanner pausado.'
+  );
 
 }
 
@@ -199,6 +246,8 @@ app.get('/health', (req, res) => {
 
     scanning,
 
+    diagnosticRunning,
+
     timestamp: Date.now()
 
   });
@@ -211,6 +260,8 @@ app.get('/health', (req, res) => {
 // ==========================================
 
 app.get('/api/status', (req, res) => {
+
+  const now = Date.now();
 
   res.json({
 
@@ -229,6 +280,10 @@ app.get('/api/status', (req, res) => {
     scanStartedAt,
 
     scanCompletedAt,
+
+    scanAgeMs: scanCompletedAt
+      ? now - scanCompletedAt
+      : null,
 
     lastScanError,
 
@@ -259,17 +314,25 @@ app.get('/api/opportunities', async (req, res) => {
 
     if (scanning && currentScanPromise) {
 
+      // Aguarda a análise em andamento.
+
       result = await currentScanPromise;
 
     } else if (!lastScan) {
+
+      // Primeira consulta.
 
       result = await executeScan();
 
     } else {
 
+      // Retorna o último resultado completo.
+
       result = lastScan;
 
     }
+
+    const now = Date.now();
 
     res.json({
 
@@ -281,13 +344,17 @@ app.get('/api/opportunities', async (req, res) => {
 
       lastUpdated: scanCompletedAt,
 
+      scanAgeMs: scanCompletedAt
+        ? now - scanCompletedAt
+        : null,
+
       lastScanError
 
     });
 
   } catch (error) {
 
-    res.status(500).json({
+    res.status(503).json({
 
       error: 'Falha ao consultar oportunidades',
 
@@ -297,7 +364,9 @@ app.get('/api/opportunities', async (req, res) => {
 
       scannerRunning,
 
-      scanning
+      scanning,
+
+      lastScanError
 
     });
 
@@ -312,6 +381,8 @@ app.get('/api/opportunities', async (req, res) => {
 
 app.get('/api/diagnostico', async (req, res) => {
 
+  // Impede diagnóstico simultâneo.
+
   if (diagnosticRunning) {
 
     return res.status(409).json({
@@ -324,17 +395,27 @@ app.get('/api/diagnostico', async (req, res) => {
 
   }
 
+  // Não disputa requisições com o scanner.
+
+  if (scanning) {
+
+    return res.status(409).json({
+
+      status: 'busy',
+
+      message:
+        'Aguarde o ciclo atual do scanner terminar.'
+
+    });
+
+  }
+
   diagnosticRunning = true;
 
   try {
 
-    const enabledExchanges = Object.entries(
-      config.EXCHANGES
-    )
-      .filter(([id, settings]) =>
-        settings.enabled && ccxt[id]
-      )
-      .map(([id]) => id);
+    const enabledExchanges =
+      getEnabledExchanges();
 
     const results = await mapWithConcurrency(
 
@@ -355,7 +436,8 @@ app.get('/api/diagnostico', async (req, res) => {
             id: exchangeId,
 
             name:
-              config.EXCHANGES[exchangeId].name,
+              config.EXCHANGES[exchangeId]?.name ||
+              exchangeId,
 
             status: 'connected',
 
@@ -374,7 +456,8 @@ app.get('/api/diagnostico', async (req, res) => {
             id: exchangeId,
 
             name:
-              config.EXCHANGES[exchangeId].name,
+              config.EXCHANGES[exchangeId]?.name ||
+              exchangeId,
 
             status: 'error',
 
@@ -397,7 +480,8 @@ app.get('/api/diagnostico', async (req, res) => {
     );
 
     const totalMarkets = results.reduce(
-      (total, item) => total + item.markets,
+      (total, item) =>
+        total + Number(item.markets || 0),
       0
     );
 
@@ -441,41 +525,44 @@ app.get('/api/diagnostico', async (req, res) => {
 
 app.get('/api/exchanges', (req, res) => {
 
-  const exchanges = Object.entries(
-    config.EXCHANGES
-  ).map(([id, settings]) => {
+  const configuredExchanges =
+    getSupportedExchanges();
 
-    const supported = Boolean(ccxt[id]);
+  const exchanges = configuredExchanges.map(
+    exchange => {
 
-    const scanInfo = lastScan?.exchanges?.find(
-      item => item.id === id
-    );
+      const scanInfo = lastScan?.exchanges?.find(
+        item => item.id === exchange.id
+      );
 
-    return {
+      return {
 
-      id,
+        id: exchange.id,
 
-      name: settings.name,
+        name: exchange.name,
 
-      enabled: settings.enabled,
+        enabled: exchange.enabled,
 
-      supported,
+        supported: exchange.supported,
 
-      connected: scanInfo
-        ? scanInfo.connected
-        : false,
+        connected: scanInfo
+          ? scanInfo.connected
+          : false,
 
-      status: scanInfo
-        ? scanInfo.status
-        : 'not_checked',
+        status: scanInfo
+          ? scanInfo.status
+          : exchange.status,
 
-      markets: scanInfo
-        ? scanInfo.markets
-        : 0
+        markets: scanInfo
+          ? scanInfo.markets
+          : 0,
 
-    };
+        error: scanInfo?.error || null
 
-  });
+      };
+
+    }
+  );
 
   res.json({
 
@@ -483,6 +570,10 @@ app.get('/api/exchanges', (req, res) => {
 
     enabled: exchanges.filter(
       item => item.enabled
+    ).length,
+
+    supported: exchanges.filter(
+      item => item.supported
     ).length,
 
     connected: exchanges.filter(
@@ -538,10 +629,10 @@ app.get('/api/config', (req, res) => {
 
 
 // ==========================================
-// CONTROLE DO SCANNER
+// INICIAR SCANNER PELA API
 // ==========================================
 
-app.post('/api/scanner/start', async (req, res) => {
+app.post('/api/scanner/start', (req, res) => {
 
   if (scannerRunning) {
 
@@ -565,10 +656,17 @@ app.post('/api/scanner/start', async (req, res) => {
 
   });
 
-  if (!scanning) {
+  if (!scanning && !diagnosticRunning) {
 
     executeScan()
-      .catch(error => console.error(error.message))
+      .catch(error => {
+
+        console.error(
+          '[SCANNER]',
+          error.message
+        );
+
+      })
       .finally(scheduleNextScan);
 
   } else {
@@ -579,6 +677,10 @@ app.post('/api/scanner/start', async (req, res) => {
 
 });
 
+
+// ==========================================
+// PAUSAR SCANNER PELA API
+// ==========================================
 
 app.post('/api/scanner/stop', (req, res) => {
 
@@ -608,6 +710,8 @@ app.get('/api/scanner/last', (req, res) => {
     scanning,
 
     scannerRunning,
+
+    diagnosticRunning,
 
     lastScanError,
 
@@ -663,21 +767,38 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, '0.0.0.0', () => {
 
-  console.log('====================================');
+  console.log(
+    '===================================='
+  );
 
-  console.log('CRYPTO ARBITRAGE SCANNER');
+  console.log(
+    'CRYPTO ARBITRAGE SCANNER'
+  );
 
-  console.log('Versão: 6.0');
+  console.log(
+    'Versão: 6.0'
+  );
 
-  console.log('Porta:', PORT);
+  console.log(
+    'Porta:',
+    PORT
+  );
 
-  console.log('Modo: SPOT');
+  console.log(
+    'Modo: SPOT'
+  );
 
-  console.log('Simulação: ATIVA');
+  console.log(
+    'Simulação: ATIVA'
+  );
 
-  console.log('Ordens reais: DESATIVADAS');
+  console.log(
+    'Ordens reais: DESATIVADAS'
+  );
 
-  console.log('====================================');
+  console.log(
+    '===================================='
+  );
 
   startScanner();
 
