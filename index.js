@@ -24,7 +24,7 @@ const {
 } = require('./exchanges');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.2.6
+// CRYPTO ARBITRAGE SCANNER 6.3.0
 // SPOT — SIMULAÇÃO USD / BRL
 // SEM ENVIO DE ORDENS REAIS
 // ==========================================
@@ -607,8 +607,6 @@ app.get('/api/config', (req, res) => {
 
     market: 'spot',
     modes: { spot: true, dex: true, futures: false },
-    dex: getDexStatus(),
-
     currencies: ALLOWED_CURRENCIES,
 
     budgets: {
@@ -821,9 +819,7 @@ app.get('/api/dex/status', (req, res) => {
 
 app.get('/api/dex/scan', async (req, res) => {
   try {
-    const result = await scanDexMarkets({
-      force: String(req.query.refresh || '').toLowerCase() === 'true'
-    });
+    const result = await scanDexMarkets();
     if (result.busy) return res.status(409).json(result);
     if (!result.success) return res.status(502).json(result);
     return res.json({ ...result, version: VERSION });
