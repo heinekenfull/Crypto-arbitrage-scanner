@@ -607,8 +607,7 @@ app.get('/api/config', (req, res) => {
     currencies: ALLOWED_CURRENCIES,
 
     budgets: {
-      USD: BUDGETS.USD,
-      BRL: BUDGETS.BRL
+      USD: BUDGETS.USD
     },
 
     simulationOnly: true,
