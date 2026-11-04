@@ -1,20 +1,15 @@
-
 require('dotenv').config();
 
 module.exports = {
-
-  // SERVIDOR
   PORT: process.env.PORT || 3000,
   NODE_ENV: process.env.NODE_ENV || 'development',
 
-  // SCANNER SPOT
   SCAN_INTERVAL: 5000,
   REQUEST_TIMEOUT: 15000,
 
   MAX_MARKETS_PER_EXCHANGE: 500,
   EXCHANGE_SCAN_CONCURRENCY: 2,
 
-  // CORRETORAS
   EXCHANGES: {
     okx: { enabled: true, name: 'OKX' },
     kucoin: { enabled: true, name: 'KuCoin' },
@@ -25,12 +20,10 @@ module.exports = {
     htx: { enabled: true, name: 'HTX' },
     bitmart: { enabled: true, name: 'BitMart' },
     bingx: { enabled: true, name: 'BingX' },
-
     binance: { enabled: false, name: 'Binance' },
     bybit: { enabled: false, name: 'Bybit' }
   },
 
-  // ARBITRAGEM
   ARBITRAGE: {
     MIN_PROFIT_PERCENT: 0.30,
     MAX_SPREAD_PERCENT: 10,
@@ -39,9 +32,7 @@ module.exports = {
     INITIAL_BALANCE: 1000
   },
 
-  // SIMULAÇÕES FINANCEIRAS
   SIMULATION: {
-
     DEFAULT_TRADE_BUDGET_USD: 100,
     DEFAULT_TRADE_BUDGET_BRL: 100,
 
@@ -63,6 +54,7 @@ module.exports = {
 
     ORDERBOOK_DEPTH: null,
     ORDERBOOK_MAX_AGE_MS: 15000,
+    MAX_BOOK_SKEW_MS: 5000,
 
     MAX_CANDIDATES_TO_VALIDATE: 100,
     VALIDATION_CONCURRENCY: 2,
@@ -72,7 +64,6 @@ module.exports = {
     MIN_NET_PROFIT_BRL: 0.10
   },
 
-  // CONTROLE DOS MÓDULOS
   MODES: {
     SPOT: true,
     FUTURES: false,
@@ -80,5 +71,4 @@ module.exports = {
     SIMULATION: true,
     LIVE_TRADING: false
   }
-
 };
