@@ -72,7 +72,7 @@ module.exports = {
   MODES: {
     SPOT: true,
     FUTURES: false,
-    DEX: false,
+    DEX: true,
     SIMULATION: true,
     LIVE_TRADING: false
   }
