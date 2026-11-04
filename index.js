@@ -32,7 +32,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.2.2';
+const VERSION = '6.2.3';
 
 const ALLOWED_CURRENCIES = ['USD', 'BRL'];
 
