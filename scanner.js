@@ -51,6 +51,11 @@ const VALIDATION_CONCURRENCY = Math.max(
   Number(SIM.VALIDATION_CONCURRENCY ?? 2)
 );
 
+const ORDERBOOK_REQUEST_TIMEOUT_MS = Math.max(
+  3000,
+  Number(SIM.ORDERBOOK_REQUEST_TIMEOUT_MS ?? 12000)
+);
+
 // ==========================================
 // UTILITÁRIOS
 // ==========================================
@@ -674,8 +679,25 @@ async function fetchOrderBook(exchange, symbol) {
   }
 
   const depth = SIM.ORDERBOOK_DEPTH || undefined;
+  let timer = null;
 
-  return exchange.fetchOrderBook(symbol, depth);
+  try {
+    return await Promise.race([
+      exchange.fetchOrderBook(symbol, depth),
+      new Promise((resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(
+            'Tempo limite ao consultar livro de ofertas: ' +
+            exchange.id + ' ' + symbol
+          ));
+        }, ORDERBOOK_REQUEST_TIMEOUT_MS);
+
+        if (typeof timer.unref === 'function') timer.unref();
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // ==========================================
