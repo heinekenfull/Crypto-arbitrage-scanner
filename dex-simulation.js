@@ -152,7 +152,7 @@ router.post('/simulate', async (req, res) => {
     if (!validateAddress(network.type, tokenAddress) || !validateAddress(network.type, quoteTokenAddress)) {
       return fail(res, 400, 'Informe endereços válidos para o token e a moeda de cotação.');
     }
-    if (tokenAddress.toLowerCase() === quoteTokenAddress.toLowerCase()) {
+    const sameAddress = network.type === 'evm'\n      ? tokenAddress.toLowerCase() === quoteTokenAddress.toLowerCase()\n      : tokenAddress === quoteTokenAddress;\n    if (sameAddress) {
       return fail(res, 400, 'Token e moeda de cotação precisam ser diferentes.');
     }
 
@@ -227,7 +227,7 @@ router.post('/simulate', async (req, res) => {
       version: '6.2.0',
       provider,
       network: networkKey,
-      tradeAmount: amount,
+      tradeAmount: amount,\n      quoteCurrencyAssumption: 'Resultado em equivalente USD; use stablecoin pareada ao dólar. O peg não é verificado pelo servidor.',
       tokenDecimals,
       quoteDecimals,
       slippageToleranceBps: slippageBps,
