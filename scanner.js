@@ -118,9 +118,9 @@ function isSpotMarket(market) {
 
   if (!market.base || !market.quote) return false;
 
-  return QUOTE_CURRENCIES.includes(
-    String(market.quote).toUpperCase()
-  );
+  const quote = String(market.quote).toUpperCase();
+
+  return QUOTE_CURRENCIES.includes(quote);
 }
 
 
@@ -132,11 +132,15 @@ function getEligibleMarkets(exchange) {
   const markets = Object.values(exchange.markets || {})
     .filter(isSpotMarket);
 
-  const conversionMarkets = markets.filter(
-    market =>
-      STABLE_CURRENCIES.includes(market.base) &&
-      market.quote === 'BRL'
-  );
+  const conversionMarkets = markets.filter(market => {
+    const base = String(market.base).toUpperCase();
+    const quote = String(market.quote).toUpperCase();
+
+    return (
+      STABLE_CURRENCIES.includes(base) &&
+      quote === 'BRL'
+    );
+  });
 
   const conversionSymbols = new Set(
     conversionMarkets.map(market => market.symbol)
@@ -184,6 +188,8 @@ function getMarketFee(exchangeId, market) {
     Number.isFinite(Number(market.taker)) &&
     Number(market.taker) >= 0
   ) {
+    // CCXT informa a taxa como fração.
+    // Exemplo: 0.001 = 0.10%.
     return Number(market.taker) * 100;
   }
 
@@ -240,8 +246,8 @@ function normalizeTicker(exchangeId, market, ticker) {
       config.EXCHANGES?.[exchangeId]?.name || exchangeId,
 
     symbol: market.symbol,
-    base: market.base,
-    quote: market.quote,
+    base: String(market.base).toUpperCase(),
+    quote: String(market.quote).toUpperCase(),
 
     bid,
     ask,
@@ -289,10 +295,12 @@ async function fetchTickerChunk(exchange, exchangeId, markets) {
   const results = [];
   const receivedSymbols = new Set();
 
-  if (
+  const supportsFetchTickers =
     exchange.has &&
-    exchange.has.fetchTickers === true
-  ) {
+    exchange.has.fetchTickers !== false &&
+    typeof exchange.fetchTickers === 'function';
+
+  if (supportsFetchTickers) {
     try {
       const tickers = await exchange.fetchTickers(
         markets.map(market => market.symbol)
@@ -594,8 +602,6 @@ function calculateOpportunities(exchangeResults) {
 
         const estimatedNet = grossSpread - fees;
 
-        // O filtro preliminar não usa o mínimo final de lucro.
-        // A aprovação financeira fica para o livro de ofertas.
         if (estimatedNet <= 0) continue;
 
         opportunities.push({
@@ -665,10 +671,12 @@ async function fetchOrderBookSnapshot(exchangeId, symbol) {
       );
     }
 
-    if (
-      !exchange.has ||
-      exchange.has.fetchOrderBook !== true
-    ) {
+    const canFetchOrderBook =
+      typeof exchange.fetchOrderBook === 'function' &&
+      exchange.has &&
+      exchange.has.fetchOrderBook !== false;
+
+    if (!canFetchOrderBook) {
       throw new Error(
         `A corretora ${exchangeId} não disponibiliza livro de ofertas`
       );
@@ -787,6 +795,21 @@ function validateBookSynchronization(buyBook, sellBook) {
 
 
 // ==========================================
+// IDENTIFICAR SIMULAÇÃO APROVADA
+// ==========================================
+
+function isSimulationValidated(simulation) {
+  return Boolean(
+    simulation &&
+    (
+      simulation.validated === true ||
+      simulation.status === 'validated'
+    )
+  );
+}
+
+
+// ==========================================
 // AVALIAR OPORTUNIDADE
 // ==========================================
 
@@ -805,8 +828,6 @@ async function evaluateCandidate(opportunity, conversionGraph) {
 
   validateBookSynchronization(buyBook, sellBook);
 
-  // Usa as taxas obtidas dos mercados carregados
-  // durante a consulta dos livros.
   opportunity.buyFeePercent = buyBook.feePercent;
   opportunity.sellFeePercent = sellBook.feePercent;
 
@@ -856,11 +877,20 @@ async function evaluateCandidate(opportunity, conversionGraph) {
       buyFeePercent: opportunity.buyFeePercent,
       sellFeePercent: opportunity.sellFeePercent,
 
-      quoteToBRL
+      quoteToBRL,
+
+      // Encaminha os limites reais dos mercados.
+      buyMarketLimits: buyBook.marketLimits,
+      sellMarketLimits: sellBook.marketLimits
     });
+
+    const validated = isSimulationValidated(result);
 
     return {
       ...result,
+
+      validated,
+      status: validated ? 'validated' : 'rejected',
 
       budgetUSD,
       tradeBudgetUSD: budgetUSD,
@@ -873,7 +903,7 @@ async function evaluateCandidate(opportunity, conversionGraph) {
   });
 
   const validated = opportunity.simulations.filter(
-    simulation => simulation.validated === true
+    isSimulationValidated
   );
 
   opportunity.validatedBudgets = validated.map(
@@ -1072,14 +1102,14 @@ async function scanMarket() {
     const aBest = Math.max(
       0,
       ...a.simulations
-        .filter(item => item.validated)
+        .filter(isSimulationValidated)
         .map(item => Number(item.netProfitBRL) || 0)
     );
 
     const bBest = Math.max(
       0,
       ...b.simulations
-        .filter(item => item.validated)
+        .filter(isSimulationValidated)
         .map(item => Number(item.netProfitBRL) || 0)
     );
 
@@ -1159,14 +1189,14 @@ async function scanMarket() {
 
       quoteCurrencies: QUOTE_CURRENCIES,
 
-      minimumEstimatedProfitPercent: MIN_PROFIT,
+      configuredMinimumProfitPercent: MIN_PROFIT,
       maximumSpreadPercent: MAX_SPREAD,
 
       preliminaryFilter:
         'Spread líquido estimado positivo. A aprovação depende da simulação completa.',
 
       note:
-        'A aprovação final considera livro de ofertas, liquidez, taxas, slippage e lucro líquido. A paridade USD/stablecoin pode ser estimada quando não existe cotação direta.'
+        'A aprovação final considera livro de ofertas, limites mínimos dos mercados, liquidez, taxas, slippage e lucro líquido. A paridade USD/stablecoin pode ser estimada quando não existe cotação direta.'
     }
   };
 
