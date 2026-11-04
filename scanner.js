@@ -13,7 +13,7 @@ const {
 } = require('./simulation');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.2.5
+// CRYPTO ARBITRAGE SCANNER 6.2.6
 // SPOT — SIMULAÇÃO USD / BRL
 // ==========================================
 
@@ -213,8 +213,17 @@ async function fetchExchangePrices(
   let markets = null;
   let tickers = null;
 
+  const exchangeStartedAt = Date.now();
+  console.log('[SCAN] ' + exchangeId + ': iniciando consulta.');
+
   try {
+    const marketsStartedAt = Date.now();
     markets = await loadMarketsSafe(exchange);
+    console.log(
+      '[SCAN] ' + exchangeId + ': mercados carregados em ' +
+      (Date.now() - marketsStartedAt) + 'ms (' +
+      Object.keys(markets || {}).length + ' mercados).'
+    );
 
     if (typeof exchange.fetchTickers !== 'function') {
       throw new Error(
@@ -251,7 +260,13 @@ async function fetchExchangePrices(
       };
     }
 
+    const tickersStartedAt = Date.now();
     tickers = await exchange.fetchTickers(symbols);
+    console.log(
+      '[SCAN] ' + exchangeId + ': tickers recebidos em ' +
+      (Date.now() - tickersStartedAt) + 'ms (' +
+      symbols.length + ' símbolos solicitados).'
+    );
 
     const prices = [];
 
@@ -320,6 +335,10 @@ async function fetchExchangePrices(
       exchange.currencies_by_id = {};
       await closeExchange(exchange);
       if (typeof global.gc === 'function') global.gc();
+      console.log(
+        '[SCAN] ' + exchangeId + ': finalizada em ' +
+        (Date.now() - exchangeStartedAt) + 'ms.'
+      );
     }
   }
 }
@@ -913,6 +932,7 @@ async function closeExchangeMap(exchangeInstances) {
 
 async function scanMarket() {
   const startedAt = Date.now();
+  console.log('[SCAN] Iniciando varredura SPOT.');
 
   const enabled = getEnabledExchanges() || [];
 
@@ -998,6 +1018,11 @@ async function scanMarket() {
     const evaluated = [];
 
     for (const group of candidateGroups.values()) {
+      const groupStartedAt = Date.now();
+      console.log(
+        '[SCAN] Validando grupo ' + group[0].buyExchangeId + ' -> ' +
+        group[0].sellExchangeId + ' (' + group.length + ' candidatos).'
+      );
       const pairInstances = new Map();
 
       try {
@@ -1041,6 +1066,11 @@ async function scanMarket() {
         }
       } finally {
         await closeExchangeMap(pairInstances);
+        console.log(
+          '[SCAN] Grupo ' + group[0].buyExchangeId + ' -> ' +
+          group[0].sellExchangeId + ' finalizado em ' +
+          (Date.now() - groupStartedAt) + 'ms.'
+        );
       }
     }
 
@@ -1061,10 +1091,17 @@ async function scanMarket() {
       item => item.status === 'validated'
     ).length;
 
+    console.log(
+      '[SCAN] Varredura concluída em ' + (Date.now() - startedAt) +
+      'ms. Mercados: ' + marketsAnalyzed +
+      ', candidatos: ' + candidates.length +
+      ', oportunidades validadas/calculadas: ' + opportunities.length + '.'
+    );
+
     return {
       success: true,
       market: 'spot',
-      version: '6.2.5',
+      version: '6.2.6',
 
       timestamp: Date.now(),
       lastUpdated: Date.now(),
