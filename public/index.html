@@ -26,17 +26,17 @@ h3{font-size:15px;margin-bottom:12px}
 button,select{background:#17263b;color:white;border:1px solid #354761;border-radius:8px;padding:12px 16px;cursor:pointer;min-height:42px}
 button.primary{background:#087c60;border-color:#087c60}
 button.simulate{background:#087c60;border-color:#159b77;font-size:11px;font-weight:bold;padding:10px}
-button.danger{background:#762c3a;border-color:#a94355}
+button.secondary{background:#24354d}
 button:disabled{opacity:.5;cursor:not-allowed}
 .panel{background:#111c2d;border:1px solid #263449;border-radius:12px;padding:18px;margin-top:18px;overflow:hidden}
 .panel-description{color:#94a3b8;font-size:13px;line-height:1.5;margin-bottom:14px}
 .table-wrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse;min-width:1150px}
+table{width:100%;border-collapse:collapse;min-width:1100px}
 th,td{text-align:left;padding:13px 10px;border-bottom:1px solid #263449;font-size:13px;white-space:nowrap}
 th{color:#94a3b8;font-weight:normal}
 .profit-cell{color:#35d49a;font-weight:bold}
 .loss-cell{color:#ff6878;font-weight:bold}
-.simulation-grid{display:grid;grid-template-columns:repeat(3,minmax(100px,1fr));gap:8px}
+.simulation-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
 .simulation-item{background:#17263b;border-radius:7px;padding:10px;min-width:0}
 .simulation-item small{display:block;color:#94a3b8;font-size:11px;margin-bottom:5px}
 .simulation-item strong{font-size:13px;overflow-wrap:anywhere}
@@ -55,10 +55,10 @@ th{color:#94a3b8;font-weight:normal}
 .history-item:last-child{border-bottom:0}
 .empty{color:#94a3b8;font-size:13px;padding:12px 0}
 footer{text-align:center;padding:25px;color:#718096;font-size:12px}
+.notice{padding:12px;border-radius:8px;background:#17263b;margin-top:12px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
 @media(max-width:600px){
 .container{padding:12px}
 header{padding:15px}
-.simulation-grid{grid-template-columns:repeat(2,minmax(100px,1fr))}
 .controls>*{width:100%}
 .control-group select{width:100%}
 }
@@ -66,6 +66,7 @@ header{padding:15px}
 </head>
 
 <body>
+
 <header>
   <div class="logo">CRYPTO ARBITRAGE SCANNER 6.2</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
@@ -76,401 +77,709 @@ header{padding:15px}
 <h2>Dashboard de Arbitragem Spot</h2>
 
 <div class="cards">
-  <div class="card"><small>Corretoras conectadas</small><h2 class="green" id="exchangeCount">0</h2></div>
-  <div class="card"><small>Mercados analisados</small><h2 id="marketCount">0</h2></div>
-  <div class="card"><small>Oportunidades aprovadas</small><h2 class="yellow" id="opportunityCount">0</h2></div>
-  <div class="card"><small>Melhor lucro líquido</small><h2 class="green" id="bestProfit">0%</h2></div>
-  <div class="card"><small>Melhor lucro estimado</small><h2 class="green" id="bestProfitBRL">R$ 0,00</h2></div>
+  <div class="card">
+    <small>Corretoras conectadas</small>
+    <h2 class="green" id="exchangeCount">0</h2>
+  </div>
+  <div class="card">
+    <small>Mercados analisados</small>
+    <h2 id="marketCount">0</h2>
+  </div>
+  <div class="card">
+    <small>Oportunidades encontradas</small>
+    <h2 class="yellow" id="opportunityCount">0</h2>
+  </div>
+  <div class="card">
+    <small>Melhor lucro líquido</small>
+    <h2 class="green" id="bestProfit">0%</h2>
+  </div>
+  <div class="card">
+    <small>Melhor lucro estimado</small>
+    <h2 class="green" id="bestProfitMoney">-</h2>
+  </div>
 </div>
 
 <div class="controls">
+
   <div class="control-group">
-    <label for="budgetSelect">Capital da simulação</label>
-    <select id="budgetSelect">
-      <option value="50">US$ 50</option>
-      <option value="100" selected>US$ 100</option>
-      <option value="150">US$ 150</option>
-      <option value="250">US$ 250</option>
-      <option value="500">US$ 500</option>
-      <option value="1000">US$ 1.000</option>
+    <label for="currencySelect">Moeda da operação</label>
+    <select id="currencySelect">
+      <option value="USD">Dólar (USD)</option>
+      <option value="BRL">Real (BRL)</option>
     </select>
   </div>
 
   <div class="control-group">
-    <label>Modalidade disponível</label>
-    <select disabled><option>SPOT</option></select>
+    <label for="budgetSelect">Capital selecionado</label>
+    <select id="budgetSelect">
+      <option value="50">50</option>
+      <option value="100" selected>100</option>
+      <option value="150">150</option>
+      <option value="250">250</option>
+      <option value="500">500</option>
+    </select>
+  </div>
+
+  <div class="control-group">
+    <label>Mercado</label>
+    <select disabled>
+      <option>SPOT</option>
+    </select>
   </div>
 
   <button class="primary" id="scanButton" onclick="scan()">NOVA ANÁLISE</button>
-  <button id="startButton" onclick="startScanner()">INICIAR</button>
-  <button class="danger" id="stopButton" onclick="stopScanner()">PAUSAR</button>
-  <button onclick="loadExchanges()">CORRETORAS</button>
+  <button class="secondary" id="exchangeButton" onclick="loadExchanges()">CORRETORAS</button>
+
 </div>
 
 <div class="panel">
   <h2>Oportunidades de arbitragem</h2>
   <p class="panel-description" id="budgetDescription">
-    Resultados calculados pelo backend. Selecione uma oportunidade para simular.
+    Selecione a moeda e o capital para simular as oportunidades.
   </p>
+
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Moeda</th><th>Comprar</th><th>Vender</th>
-          <th>Preço compra</th><th>Preço venda</th><th>Capital USD</th>
-          <th>Lucro líquido BRL</th><th>Lucro %</th><th>Preenchimento</th>
-          <th>Detalhes</th><th>Operação</th>
+          <th>Moeda</th>
+          <th>Comprar</th>
+          <th>Vender</th>
+          <th>Preço compra</th>
+          <th>Preço venda</th>
+          <th>Capital</th>
+          <th>Lucro líquido</th>
+          <th>Lucro %</th>
+          <th>Detalhes</th>
+          <th>Operação</th>
         </tr>
       </thead>
       <tbody id="opportunityTable">
-        <tr><td colspan="11">Aguardando primeira consulta...</td></tr>
+        <tr><td colspan="10">Aguardando primeira análise...</td></tr>
       </tbody>
     </table>
   </div>
 </div>
 
 <div class="panel">
-  <h2>Comparação das seis simulações</h2>
-  <p class="panel-description">Compare os resultados para os seis valores de capital.</p>
-  <div id="comparisonArea" class="muted">Nenhuma oportunidade selecionada.</div>
+  <h2>Comparação das cinco simulações</h2>
+  <p class="panel-description" id="comparisonDescription">
+    Selecione uma oportunidade para comparar os cinco capitais.
+  </p>
+  <div id="comparisonArea" class="muted">
+    Nenhuma oportunidade selecionada.
+  </div>
+  <button class="primary" id="compareButton" onclick="simulateFiveBudgets()" disabled>
+    SIMULAR OS CINCO CAPITAIS
+  </button>
 </div>
 
 <div class="panel" id="operationPanel">
   <h2>Resultado da simulação</h2>
-  <p class="panel-description">O resultado da última simulação aparecerá aqui.</p>
-  <div id="simulationResult" class="empty">Nenhuma simulação realizada nesta sessão.</div>
+  <p class="panel-description">
+    O resultado detalhado aparecerá aqui.
+  </p>
+  <div id="simulationResult" class="empty">
+    Nenhuma simulação realizada nesta sessão.
+  </div>
 </div>
 
 <div class="panel">
   <h2>Histórico de simulações</h2>
-  <p class="panel-description">Registros retornados pelo backend. O histórico atual depende do armazenamento do servidor.</p>
-  <div id="simulationHistory" class="empty">Carregando histórico...</div>
-  <button onclick="loadSimulationHistory()">ATUALIZAR HISTÓRICO</button>
+  <p class="panel-description">
+    Registros disponibilizados pelo backend.
+  </p>
+  <div id="simulationHistory" class="empty">
+    Aguardando consulta...
+  </div>
+  <button class="secondary" onclick="loadSimulationHistory()">
+    ATUALIZAR HISTÓRICO
+  </button>
 </div>
 
 <div class="panel">
   <h2>Corretoras monitoradas</h2>
-  <div class="exchange-list" id="exchangeList">Carregando corretoras...</div>
+  <div class="exchange-list" id="exchangeList">
+    Carregando corretoras...
+  </div>
 </div>
 
 <div class="panel">
   <h2>Informações do scanner</h2>
   <p class="info-line" id="lastUpdate">Aguardando atualização...</p>
-  <p class="info-line" id="scanMessage">Sistema de monitoramento iniciado.</p>
-  <p class="info-line" id="scannerState">Estado do scanner: verificando...</p>
+  <p class="info-line" id="scanMessage">Sistema inicializado.</p>
+  <p class="info-line" id="scannerState">Estado: verificando servidor...</p>
 </div>
 
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.2 · MODO SPOT / SIMULAÇÃO
+CRYPTO ARBITRAGE SCANNER 6.2 · SPOT · USD / BRL
 <br><br>
-Nenhuma ordem real é executada.
+Modo de simulação. Nenhuma ordem real é executada.
 <br>
-Resultados estimados, sujeitos a liquidez, taxas, slippage e variação de mercado.
+Resultados estimados, sujeitos a taxas, liquidez, slippage e variação de mercado.
 </footer>
 
 <script>
+'use strict';
+
+// ==========================================
+// CONFIGURAÇÃO
+// ==========================================
+
 const API = window.location.origin;
-const BUDGETS = [50,100,150,250,500,1000];
+
+const ROUTES = {
+  health: '/api/health',
+  exchanges: '/api/exchanges',
+  scan: '/api/scan?market=spot',
+  simulation: '/api/simulation',
+  history: '/api/simulations'
+};
+
+const BUDGETS = [50, 100, 150, 250, 500];
 
 let latestData = null;
 let selectedOpportunity = null;
-let lastLoadedScan = null;
-let statusRequestRunning = false;
-let dataRequestRunning = false;
+let simulationResults = {};
 let simulationInProgress = false;
+let scanInProgress = false;
 let historyRequestRunning = false;
 let exchangeRequestRunning = false;
 
-function numberValue(value){
+// ==========================================
+// FUNÇÕES BÁSICAS
+// ==========================================
+
+function numberValue(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
-function firstNumber(...values){
-  for(const value of values){
-    if(value !== undefined && value !== null && value !== ''){
+function firstNumber(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') {
       const n = Number(value);
-      if(Number.isFinite(n)) return n;
+      if (Number.isFinite(n)) return n;
     }
   }
   return 0;
 }
 
-function formatBRL(value){
-  return numberValue(value).toLocaleString('pt-BR',{
-    style:'currency',
-    currency:'BRL'
+function getCurrency() {
+  return document.getElementById('currencySelect').value;
+}
+
+function getBudget() {
+  return numberValue(document.getElementById('budgetSelect').value);
+}
+
+function formatMoney(value, currency = getCurrency()) {
+  return numberValue(value).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: currency === 'BRL' ? 'BRL' : 'USD'
   });
 }
 
-function formatUSD(value){
-  return numberValue(value).toLocaleString('en-US',{
-    style:'currency',
-    currency:'USD',
-    maximumFractionDigits:2
-  });
+function formatPercent(value) {
+  return numberValue(value).toFixed(3) + '%';
 }
 
-function formatPercent(value){
-  return numberValue(value).toFixed(3)+'%';
-}
-
-function formatPrice(value){
+function formatPrice(value) {
   const n = numberValue(value);
-  if(!n) return '-';
+  if (!n) return '-';
 
-  return n.toLocaleString('pt-BR',{
-    minimumFractionDigits:2,
-    maximumFractionDigits:8
+  return n.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 8
   });
 }
 
-function safeText(value){
+function safeText(value) {
   return value === undefined || value === null ? '-' : String(value);
 }
 
-function getBudget(simulation){
-  return numberValue(
-    simulation.budgetUSD ??
-    simulation.tradeBudgetUSD ??
-    simulation.amountUSD ??
-    simulation.budget ??
-    simulation.usd
-  );
+function setMessage(message, type = 'normal') {
+  const element = document.getElementById('scanMessage');
+  element.textContent = message;
+
+  element.className = 'info-line ' +
+    (type === 'error' ? 'red' :
+     type === 'success' ? 'green' : '');
 }
 
-function getSimulation(opportunity,budget){
-  const list = Array.isArray(opportunity.simulations)
-    ? opportunity.simulations : [];
-
-  return list.find(s=>Math.abs(getBudget(s)-budget)<0.01) || null;
+function setSimulationMessage(message, type = 'normal') {
+  const element = document.getElementById('simulationResult');
+  element.textContent = message;
+  element.className = 'notice ' +
+    (type === 'error' ? 'red' :
+     type === 'success' ? 'green' : '');
 }
 
-function getProfitPercent(s){
-  if(!s) return 0;
+async function readResponse(response) {
+  const text = await response.text();
 
-  return firstNumber(
-    s.profitPercent,
-    s.netProfitPercent,
-    s.profitPercentage
-  );
-}
+  let data;
 
-function getProfitBRL(s){
-  if(!s) return 0;
-
-  return firstNumber(
-    s.netProfitBRL,
-    s.profitBRL,
-    s.profit
-  );
-}
-
-function isValidated(s){
-  if(!s) return false;
-
-  return s.validated === true ||
-    s.status === 'validated' ||
-    s.status === 'approved' ||
-    s.status === 'success';
-}
-
-function getFillRatio(s){
-  if(!s) return null;
-
-  const value = s.fillRatio ?? s.budgetFillRatio;
-  if(value === undefined || value === null) return null;
-
-  const n = numberValue(value);
-  return n <= 1 ? n*100 : n;
-}
-
-function getBuyPrice(s){
-  return firstNumber(
-    s?.buyPrice,
-    s?.buyVWAP,
-    s?.bestBuyPrice,
-    s?.bestAsk
-  );
-}
-
-function getSellPrice(s){
-  return firstNumber(
-    s?.sellPrice,
-    s?.sellVWAP,
-    s?.bestSellPrice,
-    s?.bestBid
-  );
-}
-
-function createCell(value,className){
-  const td = document.createElement('td');
-  td.textContent = safeText(value);
-  if(className) td.className = className;
-  return td;
-}
-
-function createSimulationCard(simulation,budget,selected){
-  const card = document.createElement('div');
-  card.className = 'simulation-item'+(selected?' selected':'');
-
-  const title = document.createElement('small');
-  title.textContent = formatUSD(budget);
-
-  const profit = document.createElement('strong');
-  profit.textContent = simulation
-    ? formatBRL(getProfitBRL(simulation))
-    : 'Não disponível';
-
-  if(simulation){
-    profit.className = isValidated(simulation)?'green':'yellow';
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(
+      'O servidor retornou uma resposta que não é JSON. ' +
+      'Verifique a rota e os logs do backend.'
+    );
   }
 
-  const status = document.createElement('div');
-  status.className = 'simulation-status';
-  status.textContent = simulation
-    ? formatPercent(getProfitPercent(simulation))+' · '+
-      safeText(simulation.status || (isValidated(simulation)?'Aprovada':'Rejeitada'))
-    : 'Sem resultado';
+  if (!response.ok) {
+    throw new Error(
+      data.message ||
+      data.error ||
+      data.reason ||
+      'Erro HTTP ' + response.status
+    );
+  }
 
-  card.append(title,profit,status);
-  return card;
+  return data;
 }
 
-function renderComparison(opportunity){
-  const area = document.getElementById('comparisonArea');
+async function apiRequest(path, options = {}) {
+  const response = await fetch(API + path, {
+    cache: 'no-store',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+
+  return readResponse(response);
+}
+
+function getOpportunities(data) {
+  if (Array.isArray(data?.opportunities)) return data.opportunities;
+  if (Array.isArray(data?.data?.opportunities)) return data.data.opportunities;
+  if (Array.isArray(data?.result?.opportunities)) return data.result.opportunities;
+  return [];
+}
+
+function getOpportunityKey(opportunity) {
+  return [
+    opportunity.symbol,
+    opportunity.buyExchangeId || opportunity.buyExchange,
+    opportunity.sellExchangeId || opportunity.sellExchange
+  ].join('|');
+}
+
+function getExchangeId(opportunity, side) {
+  if (side === 'buy') {
+    return opportunity.buyExchangeId ||
+      opportunity.buyExchange ||
+      opportunity.buy?.exchangeId ||
+      opportunity.buy?.exchange;
+  }
+
+  return opportunity.sellExchangeId ||
+    opportunity.sellExchange ||
+    opportunity.sell?.exchangeId ||
+    opportunity.sell?.exchange;
+}
+
+function getExchangeName(opportunity, side) {
+  if (side === 'buy') {
+    return opportunity.buyExchange ||
+      opportunity.buy?.exchange ||
+      opportunity.buyExchangeId;
+  }
+
+  return opportunity.sellExchange ||
+    opportunity.sell?.exchange ||
+    opportunity.sellExchangeId;
+}
+
+// ==========================================
+// RESULTADOS E SIMULAÇÕES
+// ==========================================
+
+function getSimulationKey(opportunity, currency, budget) {
+  return getOpportunityKey(opportunity) + '|' + currency + '|' + budget;
+}
+
+function getSimulation(opportunity, currency, budget) {
+  return simulationResults[
+    getSimulationKey(opportunity, currency, budget)
+  ] || null;
+}
+
+function getProfit(simulation) {
+  if (!simulation) return 0;
+
+  return firstNumber(
+    simulation.netProfit,
+    simulation.netProfitBRL,
+    simulation.netProfitUSD,
+    simulation.profit,
+    simulation.result?.netProfit
+  );
+}
+
+function getProfitPercent(simulation) {
+  if (!simulation) return 0;
+
+  return firstNumber(
+    simulation.profitPercent,
+    simulation.netProfitPercent,
+    simulation.profitPercentage
+  );
+}
+
+function isApproved(simulation) {
+  if (!simulation) return false;
+
+  return simulation.validated === true ||
+    simulation.approved === true ||
+    ['validated', 'approved', 'success'].includes(
+      String(simulation.status || '').toLowerCase()
+    );
+}
+
+function getFillRatio(simulation) {
+  if (!simulation) return null;
+
+  const value = simulation.fillRatio ??
+    simulation.budgetFillRatio ??
+    simulation.filledRatio;
+
+  if (value === undefined || value === null) return null;
+
+  const n = numberValue(value);
+  return n <= 1 ? n * 100 : n;
+}
+
+function getBuyPrice(simulation, opportunity) {
+  return firstNumber(
+    simulation?.buyVWAP,
+    simulation?.buyPrice,
+    simulation?.bestBuyPrice,
+    opportunity?.buyPrice
+  );
+}
+
+function getSellPrice(simulation, opportunity) {
+  return firstNumber(
+    simulation?.sellVWAP,
+    simulation?.sellPrice,
+    simulation?.bestSellPrice,
+    opportunity?.sellPrice
+  );
+}
+
+function normalizeSimulationResponse(response) {
+  const outer = response?.data || response?.operation || response;
+  return outer?.simulation || outer?.result || outer;
+}
+
+function renderSimulationResult(response, currency, budget) {
+  const simulation = normalizeSimulationResponse(response);
+  const area = document.getElementById('simulationResult');
+
   area.innerHTML = '';
 
-  if(!opportunity){
+  const approved = isApproved(simulation);
+
+  const heading = document.createElement('h3');
+  heading.className = approved ? 'green' : 'yellow';
+  heading.textContent = approved
+    ? 'SIMULAÇÃO APROVADA'
+    : 'SIMULAÇÃO NÃO APROVADA';
+
+  const message = document.createElement('p');
+  message.className = 'info-line';
+  message.textContent = safeText(
+    simulation.reason ||
+    simulation.message ||
+    response.message ||
+    'Resultado recebido do servidor.'
+  );
+
+  const grid = document.createElement('div');
+  grid.className = 'result-grid';
+
+  const fill = getFillRatio(simulation);
+
+  const profit = firstNumber(
+    simulation.netProfit,
+    currency === 'BRL' ? simulation.netProfitBRL : simulation.netProfitUSD,
+    simulation.profit
+  );
+
+  const fields = [
+    ['Moeda', currency],
+    ['Capital solicitado', formatMoney(budget, currency)],
+    ['Lucro líquido', formatMoney(profit, currency)],
+    ['Rentabilidade', formatPercent(getProfitPercent(simulation))],
+    ['Valor investido', formatMoney(firstNumber(
+      simulation.investedAmount,
+      simulation.invested,
+      simulation.totalBuyCost
+    ), currency)],
+    ['Quantidade executável', safeText(
+      simulation.filledQuantity ?? simulation.quantity
+    )],
+    ['Preço médio de compra', formatPrice(
+      firstNumber(simulation.buyVWAP, simulation.buyPrice)
+    )],
+    ['Preço médio de venda', formatPrice(
+      firstNumber(simulation.sellVWAP, simulation.sellPrice)
+    )],
+    ['Taxa de compra', formatMoney(firstNumber(
+      simulation.buyFee,
+      simulation.buyFeeAmount
+    ), currency)],
+    ['Taxa de venda', formatMoney(firstNumber(
+      simulation.sellFee,
+      simulation.sellFeeAmount
+    ), currency)],
+    ['Slippage', formatPercent(simulation.slippagePercent)],
+    ['Preenchimento', fill === null ? '-' : fill.toFixed(2) + '%']
+  ];
+
+  fields.forEach(([label, value]) => {
+    const item = document.createElement('div');
+    item.className = 'result-item';
+
+    const small = document.createElement('small');
+    small.textContent = label;
+
+    const strong = document.createElement('strong');
+    strong.textContent = value;
+
+    item.append(small, strong);
+    grid.appendChild(item);
+  });
+
+  const disclaimer = document.createElement('p');
+  disclaimer.className = 'info-line';
+  disclaimer.style.marginTop = '12px';
+  disclaimer.textContent =
+    'Simulação informativa. Nenhuma ordem real foi enviada.';
+
+  area.append(heading, message, grid, disclaimer);
+
+  document.getElementById('operationPanel').scrollIntoView({
+    behavior: 'smooth',
+    block: 'nearest'
+  });
+}
+
+// ==========================================
+// COMPARAÇÃO DOS CINCO CAPITAIS
+// ==========================================
+
+function renderComparison() {
+  const area = document.getElementById('comparisonArea');
+  const description = document.getElementById('comparisonDescription');
+
+  area.innerHTML = '';
+
+  if (!selectedOpportunity) {
     area.textContent = 'Nenhuma oportunidade selecionada.';
+    description.textContent = 'Selecione uma oportunidade para comparar os cinco capitais.';
+    document.getElementById('compareButton').disabled = true;
     return;
   }
 
+  const currency = getCurrency();
+
+  description.textContent =
+    'Comparação em ' + currency +
+    '. Cada capital será validado individualmente pelo backend.';
+
   const heading = document.createElement('h3');
   heading.textContent =
-    safeText(opportunity.symbol)+' — '+
-    safeText(opportunity.buyExchange)+' → '+
-    safeText(opportunity.sellExchange);
+    safeText(selectedOpportunity.symbol) + ' | ' +
+    safeText(getExchangeName(selectedOpportunity, 'buy')) +
+    ' → ' +
+    safeText(getExchangeName(selectedOpportunity, 'sell'));
 
   const grid = document.createElement('div');
   grid.className = 'simulation-grid';
 
-  BUDGETS.forEach(budget=>{
-    grid.appendChild(createSimulationCard(
-      getSimulation(opportunity,budget),
-      budget,
-      budget===numberValue(document.getElementById('budgetSelect').value)
-    ));
+  BUDGETS.forEach(budget => {
+    const simulation = getSimulation(
+      selectedOpportunity,
+      currency,
+      budget
+    );
+
+    const card = document.createElement('div');
+    card.className = 'simulation-item' +
+      (budget === getBudget() ? ' selected' : '');
+
+    const title = document.createElement('small');
+    title.textContent = formatMoney(budget, currency);
+
+    const profit = document.createElement('strong');
+    profit.textContent = simulation
+      ? formatMoney(getProfit(simulation), currency)
+      : 'Não simulado';
+
+    if (simulation) {
+      profit.className = isApproved(simulation) ? 'green' : 'yellow';
+    }
+
+    const status = document.createElement('span');
+    status.className = 'simulation-status';
+    status.textContent = simulation
+      ? formatPercent(getProfitPercent(simulation)) +
+        ' · ' + safeText(simulation.status || (
+          isApproved(simulation) ? 'Aprovada' : 'Não aprovada'
+        ))
+      : 'Aguardando simulação';
+
+    card.append(title, profit, status);
+    grid.appendChild(card);
   });
 
-  area.append(heading,grid);
+  area.append(heading, grid);
+  document.getElementById('compareButton').disabled =
+    simulationInProgress;
 }
 
-function renderOpportunities(){
-  if(!latestData) return;
+// ==========================================
+// DASHBOARD
+// ==========================================
 
-  const budget = numberValue(document.getElementById('budgetSelect').value);
-  const opportunities = Array.isArray(latestData.opportunities)
-    ? latestData.opportunities : [];
+function updateDashboard(data) {
+  const exchanges = Array.isArray(data.exchanges)
+    ? data.exchanges
+    : [];
 
+  const connected = data.exchangesConnected ??
+    exchanges.filter(exchange =>
+      exchange.connected === true ||
+      exchange.status === 'connected'
+    ).length;
+
+  const markets = data.marketsAnalyzed ??
+    data.totalMarkets ??
+    exchanges.reduce((sum, exchange) =>
+      sum + numberValue(exchange.markets), 0
+    );
+
+  document.getElementById('exchangeCount').textContent = connected;
+  document.getElementById('marketCount').textContent =
+    numberValue(markets).toLocaleString('pt-BR');
+
+  const opportunities = getOpportunities(data);
+  document.getElementById('opportunityCount').textContent =
+    opportunities.length;
+}
+
+function renderOpportunities() {
   const table = document.getElementById('opportunityTable');
+  const currency = getCurrency();
+  const budget = getBudget();
+
   table.innerHTML = '';
 
   document.getElementById('budgetDescription').textContent =
-    'Capital selecionado: '+formatUSD(budget)+
-    '. A aprovação final depende da simulação com livro de ofertas atualizado.';
+    'Capital selecionado: ' + formatMoney(budget, currency) +
+    '. Moeda: ' + currency +
+    '. As simulações consideram os dados retornados pelo backend.';
 
-  const ranked = opportunities.map(item=>({
-    item,
-    simulation:getSimulation(item,budget)
-  }));
-
-  ranked.sort((a,b)=>
-    getProfitBRL(b.simulation)-getProfitBRL(a.simulation)
-  );
-
-  const approved = ranked.filter(row=>
-    row.simulation && isValidated(row.simulation)
-  );
-
-  document.getElementById('opportunityCount').textContent =
-    approved.length;
-
-  if(approved.length){
-    document.getElementById('bestProfit').textContent =
-      formatPercent(getProfitPercent(approved[0].simulation));
-
-    document.getElementById('bestProfitBRL').textContent =
-      formatBRL(getProfitBRL(approved[0].simulation));
-  }else{
-    document.getElementById('bestProfit').textContent = '0%';
-    document.getElementById('bestProfitBRL').textContent = 'R$ 0,00';
-  }
-
-  if(!opportunities.length){
-    const tr = document.createElement('tr');
-    const td = createCell('Nenhuma oportunidade encontrada nesta análise.');
-    td.colSpan = 11;
-    tr.appendChild(td);
-    table.appendChild(tr);
-    selectedOpportunity = null;
-    renderComparison(null);
+  if (!latestData) {
+    table.innerHTML =
+      '<tr><td colspan="10">Aguardando análise do scanner...</td></tr>';
     return;
   }
 
-  ranked.forEach(({item,simulation})=>{
+  const opportunities = getOpportunities(latestData);
+
+  if (!opportunities.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 10;
+    td.textContent = 'Nenhuma oportunidade encontrada nesta análise.';
+    tr.appendChild(td);
+    table.appendChild(tr);
+
+    document.getElementById('bestProfit').textContent = '0%';
+    document.getElementById('bestProfitMoney').textContent =
+      formatMoney(0, currency);
+
+    selectedOpportunity = null;
+    renderComparison();
+    return;
+  }
+
+  const ranked = opportunities.map(item => ({
+    item,
+    simulation: getSimulation(item, currency, budget)
+  }));
+
+  ranked.sort((a, b) =>
+    getProfit(b.simulation) - getProfit(a.simulation)
+  );
+
+  const best = ranked.find(row =>
+    row.simulation && isApproved(row.simulation)
+  );
+
+  document.getElementById('bestProfit').textContent = best
+    ? formatPercent(getProfitPercent(best.simulation))
+    : '0%';
+
+  document.getElementById('bestProfitMoney').textContent = best
+    ? formatMoney(getProfit(best.simulation), currency)
+    : formatMoney(0, currency);
+
+  ranked.forEach(({ item, simulation }) => {
     const tr = document.createElement('tr');
 
-    tr.appendChild(createCell(item.symbol));
-    tr.appendChild(createCell(item.buyExchange));
-    tr.appendChild(createCell(item.sellExchange));
+    const cells = [
+      item.symbol,
+      getExchangeName(item, 'buy'),
+      getExchangeName(item, 'sell'),
+      formatPrice(getBuyPrice(simulation, item)),
+      formatPrice(getSellPrice(simulation, item)),
+      formatMoney(budget, currency)
+    ];
 
-    tr.appendChild(createCell(
-      formatPrice(getBuyPrice(simulation) || item.buyPrice)
-    ));
+    cells.forEach(value => {
+      const td = document.createElement('td');
+      td.textContent = safeText(value);
+      tr.appendChild(td);
+    });
 
-    tr.appendChild(createCell(
-      formatPrice(getSellPrice(simulation) || item.sellPrice)
-    ));
+    const profitCell = document.createElement('td');
+    const percentCell = document.createElement('td');
 
-    tr.appendChild(createCell(formatUSD(budget)));
+    if (simulation) {
+      const approved = isApproved(simulation);
+      profitCell.textContent = formatMoney(getProfit(simulation), currency);
+      percentCell.textContent = formatPercent(getProfitPercent(simulation));
 
-    if(simulation){
-      const approvedSimulation = isValidated(simulation);
-      const fill = getFillRatio(simulation);
-
-      tr.appendChild(createCell(
-        formatBRL(getProfitBRL(simulation)),
-        approvedSimulation?'profit-cell':'loss-cell'
-      ));
-
-      tr.appendChild(createCell(
-        formatPercent(getProfitPercent(simulation)),
-        approvedSimulation?'profit-cell':'loss-cell'
-      ));
-
-      tr.appendChild(createCell(
-        fill===null?'-':fill.toFixed(2)+'%'
-      ));
-    }else{
-      tr.appendChild(createCell('Sem simulação'));
-      tr.appendChild(createCell('-'));
-      tr.appendChild(createCell('-'));
+      profitCell.className = approved ? 'profit-cell' : 'loss-cell';
+      percentCell.className = approved ? 'profit-cell' : 'loss-cell';
+    } else {
+      profitCell.textContent = 'Não simulado';
+      percentCell.textContent = '-';
     }
+
+    tr.append(profitCell, percentCell);
 
     const detailCell = document.createElement('td');
     const detailButton = document.createElement('button');
+    detailButton.textContent = 'COMPARAR';
 
-    detailButton.textContent = 'VER 6 VALORES';
-    detailButton.onclick = ()=>{
+    detailButton.onclick = () => {
       selectedOpportunity = item;
-      renderComparison(item);
+      renderComparison();
 
       document.getElementById('comparisonArea').scrollIntoView({
-        behavior:'smooth',
-        block:'nearest'
+        behavior: 'smooth',
+        block: 'nearest'
       });
     };
 
@@ -481,10 +790,14 @@ function renderOpportunities(){
     const simulateButton = document.createElement('button');
 
     simulateButton.className = 'simulate';
-    simulateButton.textContent = 'SIMULAR COMPRA E VENDA';
+    simulateButton.textContent = 'SIMULAR 5 CAPITAIS';
     simulateButton.disabled = simulationInProgress;
 
-    simulateButton.onclick = ()=>simulateOperation(item,simulateButton);
+    simulateButton.onclick = async () => {
+      selectedOpportunity = item;
+      renderComparison();
+      await simulateFiveBudgets();
+    };
 
     operationCell.appendChild(simulateButton);
     tr.appendChild(operationCell);
@@ -492,415 +805,258 @@ function renderOpportunities(){
     table.appendChild(tr);
   });
 
-  if(selectedOpportunity){
-    const current = opportunities.find(item=>
-      item.symbol===selectedOpportunity.symbol &&
-      item.buyExchangeId===selectedOpportunity.buyExchangeId &&
-      item.sellExchangeId===selectedOpportunity.sellExchangeId
+  if (selectedOpportunity) {
+    const current = opportunities.find(item =>
+      getOpportunityKey(item) === getOpportunityKey(selectedOpportunity)
     );
 
     selectedOpportunity = current || opportunities[0];
-  }else{
+  } else {
     selectedOpportunity = opportunities[0];
   }
 
-  renderComparison(selectedOpportunity);
+  renderComparison();
 }
 
-function updateDashboard(data){
-  const exchanges = Array.isArray(data.exchanges)?data.exchanges:[];
+// ==========================================
+// SERVIDOR
+// ==========================================
 
-  const connected = data.exchangesConnected ??
-    exchanges.filter(e=>
-      e.connected===true || e.status==='connected'
-    ).length;
-
-  const markets = data.marketsAnalyzed ??
-    exchanges.reduce((total,e)=>total+numberValue(e.markets),0);
-
-  document.getElementById('exchangeCount').textContent = connected;
-
-  document.getElementById('marketCount').textContent =
-    numberValue(markets).toLocaleString('pt-BR');
-}
-
-function applyScanData(data){
-  if(!data) return;
-
-  latestData = data;
-  updateDashboard(data);
-  renderOpportunities();
-
-  const timestamp = data.lastUpdated || data.timestamp || Date.now();
-
-  document.getElementById('lastUpdate').textContent =
-    'Última atualização: '+
-    new Date(timestamp).toLocaleString('pt-BR');
-
-  document.getElementById('scanMessage').textContent =
-    'Análise concluída. '+
-    (data.opportunities||[]).length+
-    ' oportunidades aprovadas. '+
-    (data.rejectedCount!==undefined
-      ? data.rejectedCount+' candidatos rejeitados.'
-      :'');
-}
-
-async function checkServer(){
-  try{
-    const response = await fetch(API+'/health',{cache:'no-store'});
-
-    if(!response.ok) throw new Error('Servidor indisponível');
-
-    const data = await response.json();
+async function checkServer() {
+  try {
+    const data = await apiRequest(ROUTES.health);
 
     const status = document.getElementById('serverStatus');
     status.textContent = '● SERVIDOR ONLINE';
     status.className = 'status green';
 
+    document.getElementById('scannerState').textContent =
+      'Servidor ativo: ' +
+      safeText(data.servidor || data.server || 'Crypto Arbitrage Scanner') +
+      ' · Versão: ' + safeText(data.versao || data.version || 'não informada');
+
     return data;
-  }catch(error){
+  } catch (error) {
     const status = document.getElementById('serverStatus');
     status.textContent = '● SERVIDOR OFFLINE';
     status.className = 'status red';
+
+    document.getElementById('scannerState').textContent =
+      'Não foi possível consultar o servidor: ' + error.message;
 
     return null;
   }
 }
 
-function updateScannerState(data){
-  document.getElementById('scannerState').textContent =
-    data.scanning
-      ? 'Estado: scanner analisando os mercados...'
-      : data.scannerRunning
-        ? 'Estado: scanner automático ativo.'
-        : 'Estado: scanner pausado.';
+// ==========================================
+// ANÁLISE DO MERCADO
+// ==========================================
 
-  document.getElementById('startButton').disabled =
-    Boolean(data.scannerRunning);
+async function scan() {
+  if (scanInProgress) return;
 
-  document.getElementById('stopButton').disabled =
-    !data.scannerRunning;
-}
+  scanInProgress = true;
 
-async function refreshStatus(){
-  if(statusRequestRunning) return;
-
-  statusRequestRunning = true;
-
-  try{
-    const response = await fetch(API+'/api/status',{cache:'no-store'});
-
-    if(!response.ok) throw new Error('Falha ao consultar status');
-
-    const data = await response.json();
-
-    updateScannerState(data);
-
-    if(
-      data.scanCompletedAt &&
-      data.scanCompletedAt!==lastLoadedScan &&
-      !data.scanning
-    ){
-      await loadLatestResult();
-    }
-  }catch(error){
-    document.getElementById('scanMessage').textContent =
-      'Não foi possível atualizar o status: '+error.message;
-  }finally{
-    statusRequestRunning = false;
-  }
-}
-
-async function loadLatestResult(){
-  if(dataRequestRunning) return;
-
-  dataRequestRunning = true;
-
-  try{
-    const response = await fetch(API+'/api/scanner/last',{cache:'no-store'});
-
-    if(!response.ok) throw new Error('Falha ao carregar resultado');
-
-    const result = await response.json();
-
-    if(result.data){
-      applyScanData(result.data);
-      lastLoadedScan = result.timestamp || result.data.timestamp;
-    }
-  }catch(error){
-    document.getElementById('scanMessage').textContent =
-      'Erro ao carregar resultados: '+error.message;
-  }finally{
-    dataRequestRunning = false;
-  }
-}
-
-async function scan(){
   const button = document.getElementById('scanButton');
-
   button.disabled = true;
   button.textContent = 'ANALISANDO...';
 
-  document.getElementById('scanMessage').textContent =
-    'Solicitando nova análise dos mercados...';
+  setMessage('Solicitando análise SPOT ao backend...');
 
-  try{
-    const response = await fetch(API+'/api/scanner/scan',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      cache:'no-store'
+  try {
+    const data = await apiRequest(ROUTES.scan, {
+      method: 'GET'
     });
 
-    const data = await response.json();
+    latestData = data.data || data.result || data;
 
-    if(!response.ok){
-      throw new Error(data.message||data.error||'Falha na análise');
-    }
+    updateDashboard(latestData);
+    renderOpportunities();
 
-    if(data.data && !data.opportunities){
-      applyScanData(data.data);
-    }else{
-      applyScanData(data);
-    }
+    const timestamp =
+      latestData.lastUpdated ||
+      latestData.timestamp ||
+      Date.now();
 
-    lastLoadedScan = data.lastUpdated||data.timestamp||null;
+    document.getElementById('lastUpdate').textContent =
+      'Última análise: ' +
+      new Date(timestamp).toLocaleString('pt-BR');
 
-    document.getElementById('scanMessage').textContent =
-      'Nova análise concluída com sucesso.';
-  }catch(error){
-    document.getElementById('scanMessage').textContent =
-      'Erro na análise: '+error.message;
-  }finally{
+    setMessage(
+      'Análise concluída. ' +
+      getOpportunities(latestData).length +
+      ' oportunidades encontradas.',
+      'success'
+    );
+  } catch (error) {
+    setMessage(
+      'Erro ao analisar mercado: ' + error.message,
+      'error'
+    );
+  } finally {
+    scanInProgress = false;
     button.disabled = false;
     button.textContent = 'NOVA ANÁLISE';
-    refreshStatus();
   }
 }
 
-async function startScanner(){
-  const button = document.getElementById('startButton');
-  button.disabled = true;
+// ==========================================
+// SIMULAÇÃO INDIVIDUAL
+// ==========================================
 
-  try{
-    const response = await fetch(API+'/api/scanner/start',{
-      method:'POST'
-    });
+async function requestSimulation(opportunity, budget, currency) {
+  const buyExchangeId = getExchangeId(opportunity, 'buy');
+  const sellExchangeId = getExchangeId(opportunity, 'sell');
 
-    const data = await response.json();
-
-    if(!response.ok){
-      throw new Error(data.message||data.error||'Falha ao iniciar');
-    }
-
-    document.getElementById('scanMessage').textContent =
-      data.message||'Scanner iniciado.';
-
-    await refreshStatus();
-  }catch(error){
-    document.getElementById('scanMessage').textContent =
-      'Erro ao iniciar scanner: '+error.message;
-  }finally{
-    button.disabled = false;
+  if (!opportunity.symbol || !buyExchangeId || !sellExchangeId) {
+    throw new Error(
+      'A oportunidade não possui símbolo ou identificadores das corretoras.'
+    );
   }
-}
 
-async function stopScanner(){
-  const button = document.getElementById('stopButton');
-  button.disabled = true;
+  const payload = {
+    symbol: opportunity.symbol,
+    buyExchangeId,
+    sellExchangeId,
+    budget,
+    budgetCurrency: currency,
+    quoteCurrency: currency,
+    market: 'spot'
+  };
 
-  try{
-    const response = await fetch(API+'/api/scanner/stop',{
-      method:'POST'
-    });
-
-    const data = await response.json();
-
-    if(!response.ok){
-      throw new Error(data.message||data.error||'Falha ao pausar');
-    }
-
-    document.getElementById('scanMessage').textContent =
-      data.message||'Scanner pausado.';
-
-    await refreshStatus();
-  }catch(error){
-    document.getElementById('scanMessage').textContent =
-      'Erro ao pausar: '+error.message;
-  }finally{
-    button.disabled = false;
-  }
-}
-
-function showSimulationResult(result){
-  const area = document.getElementById('simulationResult');
-  area.innerHTML = '';
-
-  const operation = result.operation || result.simulation || result.data || result;
-  const simulation =
-    operation.simulation ||
-    operation.result ||
-    operation;
-
-  const approved =
-    simulation.validated===true ||
-    simulation.status==='validated' ||
-    simulation.status==='approved' ||
-    simulation.status==='success' ||
-    operation.approved===true;
-
-  const heading = document.createElement('h3');
-  heading.className = approved?'green':'yellow';
-  heading.textContent = approved
-    ? 'SIMULAÇÃO APROVADA'
-    : 'SIMULAÇÃO NÃO APROVADA';
-
-  const message = document.createElement('p');
-  message.className = 'info-line';
-
-  message.textContent = safeText(
-    simulation.reason ||
-    operation.reason ||
-    result.message ||
-    'Resultado retornado pelo servidor.'
-  );
-
-  const grid = document.createElement('div');
-  grid.className = 'result-grid';
-
-  const fill = getFillRatio(simulation);
-
-  const fields = [
-    ['Lucro líquido',formatBRL(firstNumber(simulation.netProfitBRL,operation.netProfitBRL))],
-    ['Rentabilidade',formatPercent(firstNumber(simulation.profitPercent,simulation.netProfitPercent))],
-    ['Capital investido',formatBRL(firstNumber(simulation.investedBRL,simulation.totalBuyCostBRL,simulation.totalBuyCost))],
-    ['Quantidade',safeText(simulation.quantity ?? simulation.filledQuantity)],
-    ['Preço médio de compra',formatPrice(firstNumber(simulation.buyPrice,simulation.buyVWAP))],
-    ['Preço médio de venda',formatPrice(firstNumber(simulation.sellPrice,simulation.sellVWAP))],
-    ['Taxa de compra',formatBRL(firstNumber(simulation.buyFee,simulation.buyFeeAmount))],
-    ['Taxa de venda',formatBRL(firstNumber(simulation.sellFee,simulation.sellFeeAmount))],
-    ['Slippage',formatPercent(simulation.slippagePercent)],
-    ['Preenchimento',fill===null?'-':fill.toFixed(2)+'%']
-  ];
-
-  fields.forEach(([label,value])=>{
-    const item = document.createElement('div');
-    item.className = 'result-item';
-
-    const small = document.createElement('small');
-    small.textContent = label;
-
-    const strong = document.createElement('strong');
-    strong.textContent = value;
-
-    item.append(small,strong);
-    grid.appendChild(item);
+  const response = await apiRequest(ROUTES.simulation, {
+    method: 'POST',
+    body: JSON.stringify(payload)
   });
 
-  const disclaimer = document.createElement('p');
-  disclaimer.className = 'info-line';
-  disclaimer.style.marginTop = '12px';
-  disclaimer.textContent =
-    'Simulação informativa. Nenhuma ordem real foi enviada.';
+  const simulation = normalizeSimulationResponse(response);
 
-  area.append(heading,message,grid,disclaimer);
-
-  document.getElementById('operationPanel').scrollIntoView({
-    behavior:'smooth',
-    block:'nearest'
-  });
-}
-
-async function simulateOperation(opportunity,button){
-  if(simulationInProgress) return;
-
-  const budget = numberValue(
-    document.getElementById('budgetSelect').value
-  );
-
-  if(!opportunity){
-    alert('Selecione uma oportunidade válida.');
-    return;
+  if (!simulation || typeof simulation !== 'object') {
+    throw new Error('O backend não retornou um resultado de simulação válido.');
   }
 
-  if(!opportunity.buyExchangeId || !opportunity.sellExchangeId){
-    alert('A oportunidade não contém os identificadores das corretoras.');
+  simulationResults[
+    getSimulationKey(opportunity, currency, budget)
+  ] = simulation;
+
+  return simulation;
+}
+
+async function simulateFiveBudgets() {
+  if (simulationInProgress) return;
+
+  if (!selectedOpportunity) {
+    setSimulationMessage(
+      'Selecione uma oportunidade antes de simular.',
+      'error'
+    );
     return;
   }
 
   simulationInProgress = true;
+
+  const currency = getCurrency();
+  const button = document.getElementById('compareButton');
+
   button.disabled = true;
   button.textContent = 'SIMULANDO...';
 
-  document.querySelectorAll('.simulate').forEach(btn=>{
-    btn.disabled = true;
+  document.querySelectorAll('.simulate').forEach(element => {
+    element.disabled = true;
   });
 
-  document.getElementById('simulationResult').textContent =
-    'Enviando solicitação de simulação ao servidor...';
+  let completed = 0;
+  let errors = [];
 
-  try{
-    const payload = {
-      symbol:opportunity.symbol,
-      buyExchangeId:opportunity.buyExchangeId,
-      sellExchangeId:opportunity.sellExchangeId,
-      budgetUSD:budget
-    };
+  setSimulationMessage(
+    'Iniciando cinco simulações em ' + currency + '...'
+  );
 
-    // Utiliza a rota POST singular do backend 6.2.
-    const response = await fetch(API+'/api/simulation',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload),
-      cache:'no-store'
-    });
+  try {
+    // Sequencial para evitar sobrecarregar a corretora e o backend.
+    for (const budget of BUDGETS) {
+      setSimulationMessage(
+        'Simulando ' + formatMoney(budget, currency) +
+        ' (' + (completed + 1) + ' de 5)...'
+      );
 
-    const data = await response.json();
+      try {
+        await requestSimulation(
+          selectedOpportunity,
+          budget,
+          currency
+        );
 
-    if(!response.ok){
-      throw new Error(
-        data.message||
-        data.error||
-        data.reason||
-        'O servidor recusou a simulação.'
+        completed++;
+        renderComparison();
+      } catch (error) {
+        errors.push(formatMoney(budget, currency) + ': ' + error.message);
+      }
+    }
+
+    renderComparison();
+    renderOpportunities();
+
+    const lastSuccessful = BUDGETS
+      .slice()
+      .reverse()
+      .find(budget =>
+        getSimulation(selectedOpportunity, currency, budget)
+      );
+
+    if (lastSuccessful !== undefined) {
+      const result = getSimulation(
+        selectedOpportunity,
+        currency,
+        lastSuccessful
+      );
+
+      renderSimulationResult(result, currency, lastSuccessful);
+    }
+
+    if (errors.length) {
+      setMessage(
+        completed + ' de 5 simulações concluídas. ' +
+        errors.length + ' falharam.',
+        'error'
+      );
+
+      const errorBox = document.createElement('div');
+      errorBox.className = 'notice red';
+      errorBox.textContent = errors.join(' | ');
+      document.getElementById('simulationResult').appendChild(errorBox);
+    } else {
+      setMessage(
+        'As cinco simulações em ' + currency +
+        ' foram concluídas.',
+        'success'
       );
     }
 
-    showSimulationResult(data);
     await loadSimulationHistory();
-
-    document.getElementById('scanMessage').textContent =
-      'Solicitação de simulação processada pelo servidor.';
-  }catch(error){
-    document.getElementById('simulationResult').textContent =
-      'Não foi possível concluir a simulação: '+error.message;
-
-    document.getElementById('scanMessage').textContent =
-      'Erro na simulação: '+error.message;
-  }finally{
+  } finally {
     simulationInProgress = false;
+    button.disabled = !selectedOpportunity;
+    button.textContent = 'SIMULAR OS CINCO CAPITAIS';
+
     renderOpportunities();
   }
 }
 
-async function loadSimulationHistory(){
-  if(historyRequestRunning) return;
+// ==========================================
+// HISTÓRICO
+// ==========================================
+
+async function loadSimulationHistory() {
+  if (historyRequestRunning) return;
 
   historyRequestRunning = true;
 
   const container = document.getElementById('simulationHistory');
   container.textContent = 'Carregando histórico...';
 
-  try{
-    const response = await fetch(API+'/api/simulations',{
-      cache:'no-store'
-    });
-
-    if(!response.ok){
-      throw new Error('Falha ao consultar histórico');
-    }
-
-    const data = await response.json();
+  try {
+    const data = await apiRequest(ROUTES.history);
 
     const history = Array.isArray(data)
       ? data
@@ -908,48 +1064,40 @@ async function loadSimulationHistory(){
 
     container.innerHTML = '';
 
-    if(!history.length){
+    if (!history.length) {
       container.textContent = 'Nenhuma simulação registrada.';
       return;
     }
 
-    history.forEach(record=>{
-      const item = document.createElement('div');
-      item.className = 'history-item';
-
+    history.forEach(record => {
       const simulation =
         record.simulation ||
         record.result ||
         record;
 
-      const symbol = safeText(
-        record.symbol || record.opportunity?.symbol
+      const currency =
+        record.budgetCurrency ||
+        record.quoteCurrency ||
+        simulation.budgetCurrency ||
+        'USD';
+
+      const budget = firstNumber(
+        record.budget,
+        record.budgetUSD,
+        record.amount,
+        simulation.budget
       );
 
-      const buy = safeText(
-        record.buyExchange || record.buyExchangeId
+      const profit = firstNumber(
+        record.netProfit,
+        record.netProfitBRL,
+        record.netProfitUSD,
+        simulation.netProfit,
+        simulation.profit
       );
 
-      const sell = safeText(
-        record.sellExchange || record.sellExchangeId
-      );
-
-      const budget = formatUSD(
-        firstNumber(record.budgetUSD,record.budget)
-      );
-
-      const profit = formatBRL(
-        firstNumber(
-          record.netProfitBRL,
-          simulation.netProfitBRL
-        )
-      );
-
-      const status = safeText(
-        record.status ||
-        simulation.status ||
-        (record.approved===true?'approved':'registrada')
-      );
+      const item = document.createElement('div');
+      item.className = 'history-item';
 
       const dateValue =
         record.createdAt ||
@@ -961,97 +1109,148 @@ async function loadSimulationHistory(){
         : 'Data não informada';
 
       item.textContent =
-        date+' | '+symbol+' | '+buy+' → '+sell+
-        ' | Capital: '+budget+
-        ' | Resultado: '+profit+
-        ' | Status: '+status;
+        date +
+        ' | ' + safeText(record.symbol) +
+        ' | ' + safeText(record.buyExchange || record.buyExchangeId) +
+        ' → ' + safeText(record.sellExchange || record.sellExchangeId) +
+        ' | Capital: ' + formatMoney(budget, currency) +
+        ' | Resultado: ' + formatMoney(profit, currency) +
+        ' | Status: ' + safeText(record.status || simulation.status);
 
       container.appendChild(item);
     });
-  }catch(error){
+  } catch (error) {
     container.textContent =
-      'Não foi possível carregar o histórico: '+error.message;
-  }finally{
+      'Não foi possível carregar o histórico: ' + error.message;
+  } finally {
     historyRequestRunning = false;
   }
 }
 
-async function loadExchanges(){
-  if(exchangeRequestRunning) return;
+// ==========================================
+// CORRETORAS
+// ==========================================
+
+async function loadExchanges() {
+  if (exchangeRequestRunning) return;
 
   exchangeRequestRunning = true;
 
   const container = document.getElementById('exchangeList');
+  container.textContent = 'Consultando corretoras...';
 
-  try{
-    const response = await fetch(API+'/api/exchanges',{
-      cache:'no-store'
-    });
+  try {
+    const data = await apiRequest(ROUTES.exchanges);
+    const exchanges = data.exchanges || data.data?.exchanges || [];
 
-    if(!response.ok){
-      throw new Error('Falha ao consultar corretoras');
-    }
-
-    const data = await response.json();
     container.innerHTML = '';
 
-    (data.exchanges||[]).forEach(exchange=>{
+    if (!exchanges.length) {
+      container.textContent =
+        'O servidor não retornou a lista de corretoras.';
+      return;
+    }
+
+    exchanges.forEach(exchange => {
       const item = document.createElement('div');
       item.className = 'exchange';
 
       const dot = document.createElement('span');
       dot.className = 'dot';
 
-      if(!exchange.enabled){
+      if (exchange.enabled === false) {
         dot.classList.add('muted');
         dot.textContent = '○';
-      }else if(exchange.connected){
+      } else if (exchange.connected === true ||
+                 exchange.status === 'connected') {
         dot.classList.add('green');
         dot.textContent = '●';
-      }else{
+      } else {
         dot.classList.add('yellow');
         dot.textContent = '●';
       }
 
       item.appendChild(dot);
-      item.appendChild(document.createTextNode(exchange.name||exchange.id));
+      item.appendChild(
+        document.createTextNode(exchange.name || exchange.id || 'Corretora')
+      );
 
       const details = document.createElement('div');
       details.className = 'simulation-status';
 
-      details.textContent = !exchange.enabled
+      details.textContent = exchange.enabled === false
         ? 'Desativada'
         : exchange.connected
           ? 'Conectada'
-          : exchange.status||'Aguardando consulta';
+          : exchange.status || 'Status não confirmado';
 
       item.appendChild(details);
       container.appendChild(item);
     });
-  }catch(error){
-    container.textContent = 'Erro ao carregar corretoras: '+error.message;
-  }finally{
+
+    document.getElementById('exchangeCount').textContent =
+      exchanges.filter(exchange =>
+        exchange.connected === true ||
+        exchange.status === 'connected'
+      ).length;
+  } catch (error) {
+    container.textContent =
+      'Erro ao carregar corretoras: ' + error.message;
+  } finally {
     exchangeRequestRunning = false;
   }
 }
 
-document.getElementById('budgetSelect').addEventListener('change',()=>{
-  if(latestData) renderOpportunities();
+// ==========================================
+// EVENTOS
+// ==========================================
+
+document.getElementById('currencySelect').addEventListener('change', () => {
+  renderOpportunities();
+  renderComparison();
+
+  setMessage(
+    'Moeda selecionada: ' + getCurrency() +
+    '. Os próximos cálculos utilizarão essa moeda.'
+  );
 });
 
-async function initialize(){
-  await checkServer();
+document.getElementById('budgetSelect').addEventListener('change', () => {
+  renderOpportunities();
+  renderComparison();
+});
+
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+  setMessage('Conectando ao backend...');
+
+  const health = await checkServer();
+
   await loadExchanges();
-  await refreshStatus();
-  await loadLatestResult();
+
+  if (health) {
+    setMessage(
+      'Backend conectado. Aguardando análise do mercado.',
+      'success'
+    );
+  } else {
+    setMessage(
+      'Não foi possível conectar ao backend. Verifique o servidor.',
+      'error'
+    );
+  }
+
   await loadSimulationHistory();
 
-  setInterval(refreshStatus,3000);
-  setInterval(checkServer,15000);
-  setInterval(loadExchanges,60000);
+  // Atualiza apenas o estado do servidor.
+  setInterval(checkServer, 15000);
 }
 
 initialize();
 </script>
+
 </body>
 </html>
