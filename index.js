@@ -4,6 +4,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const config = require('./config');
 
@@ -32,7 +33,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.1.0';
+const VERSION = '6.2.0';
 const DEX_NETWORKS = {
  ethereum:{id:'ethereum',name:'Ethereum',type:'evm'},
  bsc:{id:'bsc',name:'BNB Chain',type:'evm'},
@@ -74,7 +75,18 @@ app.use(express.json({ limit: '1mb' }));
 
 app.use(express.urlencoded({ extended: true }));
 
+app.get('/', (req, res, next) => {
+  fs.readFile(path.join(__dirname, 'public', 'index.html'), 'utf8', (error, html) => {
+    if (error) return next(error);
+    const page = html
+      .replace(/6\.1\.0/g, VERSION)
+      .replace('</body>', '<script src="/dex-simulation.js"></script>\n</body>');
+    res.type('html').send(page);
+  });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api/dex', require('./dex-simulation').router);
 
 // ==========================================
 // UTILITÁRIOS
