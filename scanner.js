@@ -38,8 +38,8 @@ const MAX_SPREAD_PERCENT = Number(
 );
 
 const MAX_CANDIDATES = Math.min(
-  10,
-  Math.max(1, Number(SIM.MAX_CANDIDATES_TO_VALIDATE ?? 8))
+  20,
+  Math.max(1, Number(SIM.MAX_CANDIDATES_TO_VALIDATE ?? 18))
 );
 
 const VALIDATION_CONCURRENCY = Math.max(
@@ -240,7 +240,23 @@ async function fetchExchangePrices(
       number(config.MAX_MARKETS_PER_EXCHANGE, 300)
     );
 
-    const symbols = Object.values(markets)
+    // Prioriza ativos que costumam ter mercados compartilhados
+    // entre corretoras. Evita depender da ordem arbitrária do CCXT,
+    // que podia selecionar moedas pouco líquidas e sem pares cruzados.
+    const preferredBases = [
+      'BTC','ETH','SOL','XRP','BNB','DOGE','ADA','TRX','LINK','LTC',
+      'AVAX','DOT','BCH','TON','SUI','NEAR','UNI','ETC','APT','ARB',
+      'OP','FIL','ATOM','AAVE','INJ','ICP','XLM','HBAR','SEI','PEPE',
+      'SHIB','WIF','FET','RENDER','TAO','TIA','ONDO','POL','MKR','ENA'
+    ];
+    const baseRank = new Map(
+      preferredBases.map((base, index) => [base, index])
+    );
+    const quoteRank = new Map([
+      ['USDT', 0], ['USDC', 1], ['USD', 2], ['BRL', 3]
+    ]);
+
+    const eligibleMarkets = Object.values(markets)
       .filter(market =>
         market &&
         market.symbol &&
@@ -248,6 +264,17 @@ async function fetchExchangePrices(
         market.spot !== false &&
         QUOTE_CURRENCIES.includes(market.quote)
       )
+      .sort((a, b) => {
+        const rankA = baseRank.has(a.base) ? baseRank.get(a.base) : 1000;
+        const rankB = baseRank.has(b.base) ? baseRank.get(b.base) : 1000;
+        if (rankA !== rankB) return rankA - rankB;
+        const quoteA = quoteRank.get(a.quote) ?? 99;
+        const quoteB = quoteRank.get(b.quote) ?? 99;
+        if (quoteA !== quoteB) return quoteA - quoteB;
+        return String(a.symbol).localeCompare(String(b.symbol));
+      });
+
+    const symbols = eligibleMarkets
       .slice(0, maxMarkets)
       .map(market => market.symbol);
 
