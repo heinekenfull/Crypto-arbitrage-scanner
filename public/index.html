@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crypto Arbitrage Scanner 6.0.0</title>
+<title>Crypto Arbitrage Scanner 6.0.0 · Mobile Test</title>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -56,11 +56,32 @@ th{color:#94a3b8;font-weight:normal}
 .empty{color:#94a3b8;font-size:13px;padding:12px 0}
 footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 .notice{padding:12px;border-radius:8px;background:#17263b;margin-top:12px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
-@media(max-width:600px){
-.container{padding:12px}
-header{padding:15px}
-.controls>*{width:100%}
-.control-group select{width:100%}
+@media(max-width:700px){
+  body{font-size:14px}
+  header{padding:12px;align-items:flex-start}
+  .logo{font-size:16px;line-height:1.5}
+  .mobile-tag{display:inline-block;margin-left:5px;padding:2px 6px;border-radius:5px;background:#087c60;color:#fff;font-size:9px;vertical-align:middle}
+  .container{padding:10px}
+  h2{font-size:17px;margin:16px 0 12px}
+  .cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .card{padding:12px;min-width:0}
+  .card h2{font-size:21px;overflow-wrap:anywhere}
+  .controls{display:grid;grid-template-columns:1fr;gap:9px;margin:14px 0}
+  .controls>*{width:100%;min-width:0}
+  .control-group select,button,select{width:100%;min-height:46px}
+  .panel{padding:12px;margin-top:12px;border-radius:10px}
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+  table{min-width:900px}
+  th,td{padding:10px 8px;font-size:11px}
+  .simulation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .result-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .exchange-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .history-item{font-size:12px;overflow-wrap:anywhere}
+  #compareButton{margin-top:12px}
+}
+@media(max-width:360px){
+  .cards{grid-template-columns:1fr}
+  .simulation-grid,.result-grid,.exchange-list{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -68,7 +89,7 @@ header{padding:15px}
 <body>
 
 <header>
-  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.0.0</div>
+  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.0.0 <span class="mobile-tag">MOBILE TEST</span></div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
@@ -208,7 +229,7 @@ header{padding:15px}
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.0.0 · SPOT · USD
+CRYPTO ARBITRAGE SCANNER 6.0.0 MOBILE TEST · SPOT · USD
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
