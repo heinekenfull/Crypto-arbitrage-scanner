@@ -2,9 +2,9 @@ const axios = require('axios');
 const config = require('./config');
 
 const API_BASE = 'https://api.geckoterminal.com/api/v2';
-const CACHE_TTL_MS = 60 * 1000;
-const MIN_LIQUIDITY_USD = 10000;
-const MAX_POOLS_PER_NETWORK = 20;
+const CACHE_TTL_MS = Number(config.DEX?.CACHE_TTL_MS || 60000);
+const MIN_LIQUIDITY_USD = Number(config.DEX?.MIN_LIQUIDITY_USD || 10000);
+const MAX_POOLS_PER_NETWORK = Number(config.DEX?.MAX_POOLS_PER_NETWORK || 20);
 
 const NETWORKS = config.DEX?.NETWORKS || [
   { id: 'eth', name: 'Ethereum' },
@@ -192,10 +192,8 @@ function calculateIndicativeSpreads(pools) {
   ).slice(0, 100);
 }
 
-async function scanDexMarkets(options = {}) {
-  const force = options.force === true;
-
-  if (!force && cachedResult && Date.now() - cachedAt < CACHE_TTL_MS) {
+async function scanDexMarkets() {
+  if (cachedResult && Date.now() - cachedAt < CACHE_TTL_MS) {
     return { ...cachedResult, cached: true };
   }
 
