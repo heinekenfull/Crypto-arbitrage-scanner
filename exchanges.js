@@ -3,17 +3,16 @@ const ccxt = require('ccxt');
 const config = require('./config');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.2
+// CRYPTO ARBITRAGE SCANNER 6.2.2
 // GERENCIAMENTO DE CORRETORAS
-// SPOT EXCLUSIVAMENTE
+// SPOT — SOMENTE CONSULTA E SIMULAÇÃO
 // ==========================================
 
 const exchangeConfig = config.EXCHANGES || {};
-
 const exchangeInstances = new Set();
 
 // ==========================================
-// IDENTIFICAÇÃO DE CORRETORAS
+// IDENTIFICAÇÃO
 // ==========================================
 
 function isSupported(exchangeId) {
@@ -24,28 +23,23 @@ function isSupported(exchangeId) {
 }
 
 function isEnabled(exchangeId) {
-  const item = exchangeConfig[exchangeId];
-
-  return Boolean(
-    item &&
-    item.enabled === true
-  );
+  return exchangeConfig[exchangeId]?.enabled === true;
 }
 
 // ==========================================
-// CRIAR INSTÂNCIA CCXT
+// CRIAR INSTÂNCIA
 // ==========================================
 
 function createExchange(exchangeId) {
   if (!isSupported(exchangeId)) {
     throw new Error(
-      `Corretora não suportada pela versão instalada do CCXT: ${exchangeId}`
+      `Corretora não suportada pelo CCXT: ${exchangeId}`
     );
   }
 
   if (!isEnabled(exchangeId)) {
     throw new Error(
-      `Corretora não habilitada na configuração: ${exchangeId}`
+      `Corretora não habilitada: ${exchangeId}`
     );
   }
 
@@ -70,7 +64,7 @@ function createExchange(exchangeId) {
 }
 
 // ==========================================
-// FECHAR INSTÂNCIA COM SEGURANÇA
+// FECHAR INSTÂNCIA
 // ==========================================
 
 async function closeExchange(exchange) {
@@ -86,7 +80,7 @@ async function closeExchange(exchange) {
     await exchange.close();
   } catch (error) {
     console.warn(
-      '[EXCHANGES] Erro ao fechar conexão:',
+      '[EXCHANGES] Falha ao fechar conexão:',
       exchange.id || 'desconhecida',
       error.message || String(error)
     );
@@ -94,22 +88,31 @@ async function closeExchange(exchange) {
 }
 
 // ==========================================
-// FECHAR TODAS AS INSTÂNCIAS ATIVAS
+// LIMPAR TODAS AS INSTÂNCIAS
 // ==========================================
 
 async function clearExchangeCache() {
   const instances = Array.from(exchangeInstances);
 
-  await Promise.all(
-    instances.map(exchange =>
-      closeExchange(exchange)
-    )
+  const results = await Promise.all(
+    instances.map(async exchange => {
+      try {
+        await closeExchange(exchange);
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    })
   );
 
   exchangeInstances.clear();
 
   return {
-    closed: instances.length
+    closed: results.filter(item => item.success).length,
+    failed: results.filter(item => !item.success).length
   };
 }
 
@@ -121,23 +124,17 @@ function getSupportedExchanges() {
   return Object.entries(exchangeConfig).map(
     ([exchangeId, settings]) => {
       const supported = isSupported(exchangeId);
-
-      const enabled =
-        settings.enabled === true;
+      const enabled = settings.enabled === true;
 
       return {
         id: exchangeId,
 
-        name:
-          settings.name ||
-          exchangeId,
+        name: settings.name || exchangeId,
 
         enabled,
-
         supported,
 
-        available:
-          enabled && supported,
+        available: enabled && supported,
 
         status: !supported
           ? 'unsupported'
@@ -151,6 +148,7 @@ function getSupportedExchanges() {
 
 // ==========================================
 // CORRETORAS HABILITADAS
+// Retorna IDs em formato de array de strings.
 // ==========================================
 
 function getEnabledExchanges() {
@@ -182,7 +180,6 @@ async function loadExchangeMarkets(exchangeId) {
 
       count: Object.keys(markets || {}).length
     };
-
   } finally {
     await closeExchange(exchange);
   }
@@ -212,9 +209,9 @@ function getExchangeCapabilities(exchangeId) {
     }
   });
 
-  const has = exchange.has || {};
+  const capabilities = exchange.has || {};
 
-  return {
+  const result = {
     id: exchangeId,
 
     name:
@@ -230,21 +227,34 @@ function getExchangeCapabilities(exchangeId) {
     spot: true,
 
     fetchTicker:
-      has.fetchTicker === true,
+      capabilities.fetchTicker === true,
 
     fetchTickers:
-      has.fetchTickers === true,
+      capabilities.fetchTickers === true,
 
     fetchOrderBook:
-      has.fetchOrderBook === true,
+      capabilities.fetchOrderBook === true,
 
     watchTicker:
-      has.watchTicker === true,
+      capabilities.watchTicker === true,
 
     authenticated: false,
 
     realOrdersEnabled: false
   };
+
+  // A instância usada para consultar capacidades
+  // não é adicionada ao conjunto de conexões ativas.
+
+  return result;
+}
+
+// ==========================================
+// ESTADO DAS CONEXÕES
+// ==========================================
+
+function getActiveExchangeInstances() {
+  return exchangeInstances.size;
 }
 
 // ==========================================
@@ -253,20 +263,17 @@ function getExchangeCapabilities(exchangeId) {
 
 module.exports = {
   createExchange,
-
   closeExchange,
-
   clearExchangeCache,
 
   getSupportedExchanges,
-
   getEnabledExchanges,
 
   loadExchangeMarkets,
-
   getExchangeCapabilities,
 
-  isSupported,
+  getActiveExchangeInstances,
 
+  isSupported,
   isEnabled
 };
