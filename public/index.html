@@ -1520,6 +1520,26 @@ async function scanDexPools() {
 // ==========================================
 // EVENTOS
 // ==========================================
+document.getElementById('spotModeButton').addEventListener('click', () => {
+  document.getElementById('spotMode').style.display = '';
+  document.getElementById('dexPanel').style.display = 'none';
+  document.getElementById('spotModeButton').className = 'primary';
+  document.getElementById('dexModeButton').className = 'secondary';
+});
+
+document.getElementById('dexModeButton').addEventListener('click', () => {
+  document.getElementById('spotMode').style.display = 'none';
+  document.getElementById('dexPanel').style.display = '';
+  document.getElementById('spotModeButton').className = 'secondary';
+  document.getElementById('dexModeButton').className = 'primary';
+});
+
+document.getElementById('dexScanButton').addEventListener('click', scanDexPools);
+
+document.getElementById('dexNetworkSelect').addEventListener('change', () => {
+  if (dexLastData) renderDexPools(dexLastData);
+});
+
 
 document.getElementById('budgetSelect').addEventListener('change', () => {
   renderOpportunities();
