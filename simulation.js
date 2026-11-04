@@ -496,8 +496,9 @@ function simulateBudget(params = {}) {
 
   if (netProfitBRL !== null && usdToBRL > 0) {
     netProfitUSD = netProfitBRL / usdToBRL;
-  } else if (capital.currency === 'USD') {
+  } else {
     netProfitUSD = netProfit;
+  }
 
   const minimumProfitBRL = number(
     params.minNetProfitBRL,
