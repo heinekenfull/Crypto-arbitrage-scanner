@@ -32,7 +32,16 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.0.0';
+const VERSION = '6.1.0';
+const DEX_NETWORKS = {
+ ethereum:{id:'ethereum',name:'Ethereum',type:'evm'},
+ bsc:{id:'bsc',name:'BNB Chain',type:'evm'},
+ polygon:{id:'polygon',name:'Polygon',type:'evm'},
+ arbitrum:{id:'arbitrum',name:'Arbitrum',type:'evm'},
+ base:{id:'base',name:'Base',type:'evm'},
+ solana:{id:'solana',name:'Solana',type:'solana'}
+};
+let lastDexRequestAt = 0;
 
 const ALLOWED_CURRENCIES = ['USD'];
 
@@ -179,7 +188,7 @@ function getServerStatus() {
     servidor: 'Crypto Arbitrage Scanner',
     version: VERSION,
     market: 'spot',
-    modes: { spot: true, dex: false, futures: false },
+    modes: { spot: true, dex: true, futures: false },
 
     scannerRunning,
     simulationRunning,
@@ -609,7 +618,7 @@ app.get('/api/config', (req, res) => {
     version: VERSION,
 
     market: 'spot',
-    modes: { spot: true, dex: false, futures: false },
+    modes: { spot: true, dex: true, futures: false },
     currencies: ALLOWED_CURRENCIES,
 
     budgets: {
@@ -631,6 +640,53 @@ app.get('/api/config', (req, res) => {
 // ==========================================
 // ROTAS DE CORRETORAS
 // ==========================================
+
+
+app.get('/api/dex/networks', (req,res) => res.json({
+ success:true, networks:Object.values(DEX_NETWORKS), provider:'DexScreener',
+ readOnly:true, transactionsEnabled:false
+}));
+app.get('/api/dex/pools', async (req,res) => {
+ const network=String(req.query.network||'').trim().toLowerCase();
+ const tokenAddress=String(req.query.tokenAddress||'').trim();
+ const selected=DEX_NETWORKS[network];
+ if(!selected) return sendError(res,400,'Rede DEX não suportada.');
+ const valid=selected.type==='evm' ? /^0x[a-fA-F0-9]{40}$/.test(tokenAddress)
+  : /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tokenAddress);
+ if(!valid) return sendError(res,400,selected.type==='evm'
+  ? 'Informe um contrato EVM válido (0x + 40 caracteres hexadecimais).'
+  : 'Informe um endereço de token Solana válido.');
+ if(Date.now()-lastDexRequestAt<1500) return sendError(res,429,'Aguarde um instante antes de consultar novamente.');
+ lastDexRequestAt=Date.now();
+ const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),9000);
+ try {
+  const endpoint='https://api.dexscreener.com/token-pairs/v1/'+encodeURIComponent(selected.id)+'/'+encodeURIComponent(tokenAddress);
+  const response=await fetch(endpoint,{headers:{accept:'application/json'},signal:controller.signal});
+  if(!response.ok) throw new Error('Provedor DEX respondeu HTTP '+response.status+'.');
+  const payload=await response.json();
+  if(!Array.isArray(payload)) throw new Error('Resposta inesperada do provedor DEX.');
+  const requested=tokenAddress.toLowerCase();
+  const pools=payload.map(pair=>{
+   const base=String(pair.baseToken?.address||'').toLowerCase(), quote=String(pair.quoteToken?.address||'').toLowerCase();
+   const baseUsd=Number(pair.priceUsd), native=Number(pair.priceNative); let price=null;
+   if(base===requested&&Number.isFinite(baseUsd)) price=baseUsd;
+   else if(quote===requested&&Number.isFinite(baseUsd)&&native>0) price=baseUsd/native;
+   return {network:selected.name,dexId:pair.dexId||'DEX',pairAddress:pair.pairAddress||null,pairUrl:pair.url||null,
+    baseToken:pair.baseToken?.symbol||'-',quoteToken:pair.quoteToken?.symbol||'-',tokenPriceUsd:price,
+    liquidityUsd:Number(pair.liquidity?.usd||0),volume24hUsd:Number(pair.volume?.h24||0),priceChange24h:Number(pair.priceChange?.h24||0)};
+  }).filter(p=>p.tokenPriceUsd>0&&Number.isFinite(p.tokenPriceUsd)&&p.liquidityUsd>0)
+    .sort((a,b)=>b.liquidityUsd-a.liquidityUsd).slice(0,50);
+  const ranked=pools.slice().sort((a,b)=>a.tokenPriceUsd-b.tokenPriceUsd), low=ranked[0]||null, high=ranked[ranked.length-1]||null;
+  const spread=low&&high&&low.tokenPriceUsd>0?(high.tokenPriceUsd-low.tokenPriceUsd)/low.tokenPriceUsd*100:0;
+  res.json({success:true,version:VERSION,provider:'DexScreener',network:selected,tokenAddress,poolsFound:pools.length,pools,
+   comparison:{lowestPricePool:low,highestPricePool:high,grossSpreadPercent:Number(spread.toFixed(6)),preliminaryOnly:true},
+   readOnly:true,transactionsEnabled:false,
+   disclaimer:'Diferença indicativa entre pools; não é cotação executável nem lucro líquido. Não desconta swap fees, gas, impacto de preço, slippage ou bridge.'});
+ } catch(error) {
+  console.error('[DEX]',error);
+  return sendError(res,error.name==='AbortError'?504:502,error.name==='AbortError'?'Tempo limite ao consultar os pools DEX.':error.message||'Falha ao consultar provedor DEX.');
+ } finally {clearTimeout(timeout);}
+});
 
 app.get('/api/exchanges', (req, res) => {
   const supported = getSupportedExchanges() || [];
@@ -853,7 +909,7 @@ const server = app.listen(PORT, () => {
   console.log('======================================');
   console.log('CRYPTO ARBITRAGE SCANNER ' + VERSION);
   console.log('Servidor iniciado na porta ' + PORT);
-  console.log('Mercado: SPOT');
+  console.log('Mercados: SPOT + DEX (somente leitura)');
   console.log('Moedas: USD / BRL');
   console.log('Orçamentos USD:', BUDGETS.USD.join(', '));
   console.log('Ordens reais: DESABILITADAS');
