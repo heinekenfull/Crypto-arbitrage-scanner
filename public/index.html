@@ -124,7 +124,7 @@ header{padding:15px}
 
 </div>
 
-<div class="panel" id="dexPanel"><h2>DEX Multichain</h2><p class="panel-description">Monitoramento informativo de pools em Ethereum, BNB Chain, Polygon, Arbitrum, Optimism, Base, Avalanche e Solana.</p><div class="controls"><div class="control-group"><label for="dexNetworkSelect">Rede</label><select id="dexNetworkSelect"><option value="all">Todas as redes</option><option value="eth">Ethereum</option><option value="bsc">BNB Chain</option><option value="polygon_pos">Polygon</option><option value="arbitrum">Arbitrum</option><option value="optimism">Optimism</option><option value="base">Base</option><option value="avax">Avalanche</option><option value="solana">Solana</option></select></div><button class="primary" id="dexScanButton">ANALISAR DEX</button></div><p class="info-line" id="dexSummary">Aguardando consulta.</p><div class="table-wrap"><table><thead><tr><th>Rede</th><th>Token / Pool</th><th>DEX</th><th>Preço USD</th><th>Liquidez USD</th><th>Volume 24h USD</th></tr></thead><tbody id="dexPoolTable"><tr><td colspan="6">Clique em ANALISAR DEX.</td></tr></tbody></table></div><div class="notice">Diferenças de preço são indicativas, não executáveis. Ainda não incluem cotação de swap, gas, impacto de preço ou MEV. Nenhuma ordem real é enviada.</div></div>
+<div class="panel" id="dexPanel"><h2>DEX Multichain</h2><p class="panel-description">Monitoramento informativo de pools em Ethereum, BNB Chain, Polygon, Arbitrum, Optimism, Base, Avalanche e Solana.</p><div class="controls"><div class="control-group"><label for="dexNetworkSelect">Rede</label><select id="dexNetworkSelect"><option value="all">Todas as redes</option><option value="eth">Ethereum</option><option value="bsc">BNB Chain</option><option value="polygon_pos">Polygon</option><option value="arbitrum">Arbitrum</option><option value="optimism">Optimism</option><option value="base">Base</option><option value="avax">Avalanche</option><option value="solana">Solana</option></select></div><button class="primary" id="dexScanButton">ANALISAR DEX</button></div><p class="info-line" id="dexSummary">Aguardando consulta.</p><h3>Diferenças indicativas entre DEXs</h3><div class="table-wrap"><table><thead><tr><th>Rede</th><th>Token</th><th>DEX com menor preço</th><th>DEX com maior preço</th><th>Diferença</th></tr></thead><tbody id="dexSpreadTable"><tr><td colspan="5">Aguardando análise.</td></tr></tbody></table></div><h3 style="margin-top:16px">Pools monitorados</h3><div class="table-wrap"><table><thead><tr><th>Rede</th><th>Token / Pool</th><th>DEX</th><th>Preço USD</th><th>Liquidez USD</th><th>Volume 24h USD</th></tr></thead><tbody id="dexPoolTable"><tr><td colspan="6">Clique em ANALISAR DEX.</td></tr></tbody></table></div><div class="notice">Diferenças de preço são indicativas, não executáveis. Ainda não incluem cotação de swap, gas, impacto de preço ou MEV. Nenhuma ordem real é enviada.</div></div>
 <div class="panel">
   <h2>Oportunidades de arbitragem</h2>
   <p class="panel-description" id="budgetDescription">
@@ -1430,6 +1430,32 @@ initialize();
 </body>
 </html>
  + numberValue(pool.volume24hUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ].forEach(value => {
+        const cell = row.insertCell();
+        cell.textContent = value;
+      });
+    });
+  }
+
+  const spreadBody = document.getElementById('dexSpreadTable');
+  spreadBody.replaceChildren();
+  const spreadRows = (data.indicativeSpreads || []).filter(item =>
+    selectedNetwork === 'all' || item.networkId === selectedNetwork
+  );
+  if (!spreadRows.length) {
+    const row = spreadBody.insertRow();
+    const cell = row.insertCell();
+    cell.colSpan = 5;
+    cell.textContent = 'Nenhuma diferença indicativa entre pools encontrada.';
+  } else {
+    spreadRows.slice(0, 50).forEach(item => {
+      const row = spreadBody.insertRow();
+      [
+        item.network,
+        item.token,
+        item.lowerDex,
+        item.higherDex,
+        numberValue(item.indicativeSpreadPercent).toFixed(3) + '%'
       ].forEach(value => {
         const cell = row.insertCell();
         cell.textContent = value;
