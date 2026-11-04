@@ -10,19 +10,14 @@ module.exports = {
   MAX_MARKETS_PER_EXCHANGE: 120,
   EXCHANGE_SCAN_CONCURRENCY: 1,
 
+  // Somente corretoras suportadas e habilitadas para o scanner SPOT.
   EXCHANGES: {
     okx: { enabled: true, name: 'OKX' },
     kucoin: { enabled: true, name: 'KuCoin' },
-    gateio: { enabled: true, name: 'Gate.io' },
     mexc: { enabled: true, name: 'MEXC' },
     bitget: { enabled: true, name: 'Bitget' },
-    coinex: { enabled: true, name: 'CoinEx' },
     htx: { enabled: true, name: 'HTX' },
-    bitmart: { enabled: true, name: 'BitMart' },
-    bingx: { enabled: true, name: 'BingX' },
-
-    binance: { enabled: false, name: 'Binance' },
-    bybit: { enabled: false, name: 'Bybit' }
+    bingx: { enabled: true, name: 'BingX' }
   },
 
   ARBITRAGE: {
