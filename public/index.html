@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crypto Arbitrage Scanner 6.0.0 · Mobile Test</title>
+<title>Crypto Arbitrage Scanner 6.1.0</title>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -83,13 +83,19 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
   .cards{grid-template-columns:1fr}
   .simulation-grid,.result-grid,.exchange-list{grid-template-columns:1fr}
 }
+.dex-network-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:end}
+.dex-network-row input,.dex-network-row select{width:100%;min-height:44px;background:#17263b;color:#fff;border:1px solid #354761;border-radius:8px;padding:11px}
+.dex-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+.dex-table{min-width:760px}.dex-table a{color:#35d49a;text-decoration:none}
+.dex-disclaimer{font-size:12px;color:#f5c451;line-height:1.6;margin-top:12px}
+@media(max-width:700px){.dex-network-row{grid-template-columns:1fr}.dex-table{min-width:680px}}
 </style>
 </head>
 
 <body>
 
 <header>
-  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.0.0 <span class="mobile-tag">MOBILE TEST</span></div>
+  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.1.0</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
@@ -225,11 +231,25 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
   <p class="info-line" id="scannerState">Estado: verificando servidor...</p>
 </div>
 
+
+<div class="panel" id="dexPanel">
+ <h2>Scanner DEX · Multi-chain</h2>
+ <p class="panel-description">Compare pools e preços do mesmo token dentro da rede selecionada. Consulta pública e somente leitura.</p>
+ <div class="dex-network-row">
+  <div class="control-group"><label for="dexNetwork">Rede</label><select id="dexNetwork"><option value="ethereum">Ethereum</option><option value="bsc">BNB Chain</option><option value="polygon">Polygon</option><option value="arbitrum">Arbitrum</option><option value="base">Base</option><option value="solana">Solana</option></select></div>
+  <div class="control-group"><label for="dexTokenAddress">Endereço do contrato / mint</label><input id="dexTokenAddress" type="text" autocomplete="off" placeholder="Cole o endereço do token"></div>
+  <button class="primary" id="dexScanButton" onclick="scanDexPools()">ANALISAR POOLS</button>
+ </div>
+ <div id="dexStatus" class="empty">Informe a rede e o endereço do token para começar.</div>
+ <div id="dexSummary" class="dex-summary"></div>
+ <div class="table-wrap"><table class="dex-table"><thead><tr><th>DEX / Pool</th><th>Par</th><th>Preço do token (USD)</th><th>Liquidez (USD)</th><th>Volume 24h (USD)</th><th>Variação 24h</th></tr></thead><tbody id="dexPoolTable"><tr><td colspan="6">Nenhuma consulta realizada.</td></tr></tbody></table></div>
+ <p class="dex-disclaimer">A diferença exibida é bruta e indicativa. Ainda não representa arbitragem executável nem lucro líquido: gas, taxas de swap, impacto de preço, slippage e bridges não estão descontados. Nenhuma carteira é conectada e nenhuma transação é enviada.</p>
+</div>
 </div>
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.0.0 MOBILE TEST · SPOT · USD
+CRYPTO ARBITRAGE SCANNER 6.1.0 · SPOT + DEX
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -1226,6 +1246,38 @@ async function loadExchanges() {
 
 
 // ==========================================
+
+async function scanDexPools(){
+ const button=document.getElementById('dexScanButton');
+ const status=document.getElementById('dexStatus');
+ const summary=document.getElementById('dexSummary');
+ const table=document.getElementById('dexPoolTable');
+ const network=document.getElementById('dexNetwork').value;
+ const tokenAddress=document.getElementById('dexTokenAddress').value.trim();
+ if(!tokenAddress){status.textContent='Cole o endereço do token para consultar os pools.';return;}
+ button.disabled=true;button.textContent='CONSULTANDO...';status.textContent='Buscando pools públicos...';summary.innerHTML='';
+ table.innerHTML='<tr><td colspan="6">Consultando...</td></tr>';
+ try {
+  const query=new URLSearchParams({network:network,tokenAddress:tokenAddress});
+  const data=await apiRequest('/api/dex/pools?'+query.toString());
+  status.textContent=data.poolsFound+' pools encontrados em '+data.network.name+'.';
+  const low=data.comparison && data.comparison.lowestPricePool;
+  const high=data.comparison && data.comparison.highestPricePool;
+  const cards=[['Pools encontrados',String(data.poolsFound)],['Menor preço',low?'$'+Number(low.tokenPriceUsd).toPrecision(8):'-'],['Maior preço',high?'$'+Number(high.tokenPriceUsd).toPrecision(8):'-'],['Diferença bruta',Number(data.comparison.grossSpreadPercent||0).toFixed(4)+'%']];
+  cards.forEach(function(entry){const card=document.createElement('div');card.className='result-item';const small=document.createElement('small');small.textContent=entry[0];const strong=document.createElement('strong');strong.textContent=entry[1];card.append(small,strong);summary.appendChild(card);});
+  table.innerHTML='';
+  if(!data.pools.length){table.innerHTML='<tr><td colspan="6">Nenhum pool com preço e liquidez disponíveis.</td></tr>';return;}
+  data.pools.forEach(function(pool){
+   const tr=document.createElement('tr');
+   const values=[pool.dexId,pool.baseToken+' / '+pool.quoteToken,'$'+Number(pool.tokenPriceUsd).toPrecision(8),'$'+Number(pool.liquidityUsd).toLocaleString('en-US',{maximumFractionDigits:0}),'$'+Number(pool.volume24hUsd).toLocaleString('en-US',{maximumFractionDigits:0}),Number(pool.priceChange24h||0).toFixed(2)+'%'];
+   values.forEach(function(value,i){const td=document.createElement('td');if(i===0&&pool.pairUrl){const link=document.createElement('a');link.href=pool.pairUrl;link.target='_blank';link.rel='noopener noreferrer';link.textContent=value;td.appendChild(link);}else{td.textContent=value;}tr.appendChild(td);});
+   table.appendChild(tr);
+  });
+ } catch(error) {
+  status.textContent='Erro na consulta DEX: '+error.message;
+  table.innerHTML='<tr><td colspan="6">Não foi possível consultar os pools.</td></tr>';
+ } finally {button.disabled=false;button.textContent='ANALISAR POOLS';}
+}
 // EVENTOS
 // ==========================================
 document.getElementById('budgetSelect').addEventListener('change', () => {
