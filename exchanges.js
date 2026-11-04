@@ -3,217 +3,260 @@ const ccxt = require('ccxt');
 const config = require('./config');
 
 // ==========================================
-// EXCHANGE MANAGER
-// CRYPTO ARBITRAGE SCANNER
+// CRYPTO ARBITRAGE SCANNER 6.2
+// GERENCIAMENTO DE CORRETORAS
+// SPOT EXCLUSIVAMENTE
 // ==========================================
 
-const exchangeCache = new Map();
+const exchangeConfig = config.EXCHANGES || {};
 
+const exchangeInstances = new Set();
 
 // ==========================================
-// VERIFICAR SUPORTE DO CCXT
+// IDENTIFICAÇÃO DE CORRETORAS
 // ==========================================
 
 function isSupported(exchangeId) {
   return (
+    typeof exchangeId === 'string' &&
     typeof ccxt[exchangeId] === 'function'
   );
 }
 
+function isEnabled(exchangeId) {
+  const item = exchangeConfig[exchangeId];
+
+  return Boolean(
+    item &&
+    item.enabled === true
+  );
+}
 
 // ==========================================
-// CRIAR OU REUTILIZAR CONEXÃO
+// CRIAR INSTÂNCIA CCXT
 // ==========================================
 
 function createExchange(exchangeId) {
-
   if (!isSupported(exchangeId)) {
     throw new Error(
-      `Corretora não suportada pelo CCXT: ${exchangeId}`
+      `Corretora não suportada pela versão instalada do CCXT: ${exchangeId}`
     );
   }
 
-  if (exchangeCache.has(exchangeId)) {
-    return exchangeCache.get(exchangeId);
+  if (!isEnabled(exchangeId)) {
+    throw new Error(
+      `Corretora não habilitada na configuração: ${exchangeId}`
+    );
   }
 
-  const exchange = new ccxt[exchangeId]({
+  const ExchangeClass = ccxt[exchangeId];
 
+  const exchange = new ExchangeClass({
     enableRateLimit: true,
 
-    timeout: config.REQUEST_TIMEOUT || 15000,
+    timeout: Number(
+      config.REQUEST_TIMEOUT || 15000
+    ),
 
     options: {
-      defaultType: 'spot'
+      defaultType: 'spot',
+      adjustForTimeDifference: true
     }
-
   });
 
-  exchangeCache.set(exchangeId, exchange);
+  exchangeInstances.add(exchange);
 
   return exchange;
 }
 
+// ==========================================
+// FECHAR INSTÂNCIA COM SEGURANÇA
+// ==========================================
+
+async function closeExchange(exchange) {
+  if (!exchange) return;
+
+  exchangeInstances.delete(exchange);
+
+  if (typeof exchange.close !== 'function') {
+    return;
+  }
+
+  try {
+    await exchange.close();
+  } catch (error) {
+    console.warn(
+      '[EXCHANGES] Erro ao fechar conexão:',
+      exchange.id || 'desconhecida',
+      error.message || String(error)
+    );
+  }
+}
 
 // ==========================================
-// LISTAR CORRETORAS CONFIGURADAS
+// FECHAR TODAS AS INSTÂNCIAS ATIVAS
+// ==========================================
+
+async function clearExchangeCache() {
+  const instances = Array.from(exchangeInstances);
+
+  await Promise.all(
+    instances.map(exchange =>
+      closeExchange(exchange)
+    )
+  );
+
+  exchangeInstances.clear();
+
+  return {
+    closed: instances.length
+  };
+}
+
+// ==========================================
+// CORRETORAS SUPORTADAS
 // ==========================================
 
 function getSupportedExchanges() {
+  return Object.entries(exchangeConfig).map(
+    ([exchangeId, settings]) => {
+      const supported = isSupported(exchangeId);
 
-  return Object.entries(config.EXCHANGES)
-    .map(([id, settings]) => {
-
-      const supported = isSupported(id);
+      const enabled =
+        settings.enabled === true;
 
       return {
+        id: exchangeId,
 
-        id,
+        name:
+          settings.name ||
+          exchangeId,
 
-        name: settings.name || id,
-
-        enabled: Boolean(settings.enabled),
+        enabled,
 
         supported,
 
-        available: Boolean(
-          settings.enabled && supported
-        ),
+        available:
+          enabled && supported,
 
         status: !supported
           ? 'unsupported'
-          : settings.enabled
+          : enabled
             ? 'configured'
             : 'disabled'
-
       };
-
-    });
-
+    }
+  );
 }
 
-
 // ==========================================
-// LISTAR CORRETORAS ATIVAS
+// CORRETORAS HABILITADAS
 // ==========================================
 
 function getEnabledExchanges() {
-
-  return getSupportedExchanges()
-    .filter(exchange => exchange.available)
-    .map(exchange => exchange.id);
-
+  return Object.keys(exchangeConfig).filter(
+    exchangeId =>
+      isEnabled(exchangeId) &&
+      isSupported(exchangeId)
+  );
 }
-
 
 // ==========================================
 // CARREGAR MERCADOS
 // ==========================================
 
 async function loadExchangeMarkets(exchangeId) {
-
   const exchange = createExchange(exchangeId);
 
-  await exchange.loadMarkets();
+  try {
+    const markets = await exchange.loadMarkets();
 
-  return {
-
-    exchangeId,
-
-    exchange: config.EXCHANGES[exchangeId]?.name ||
+    return {
       exchangeId,
 
-    totalMarkets: Object.keys(
-      exchange.markets || {}
-    ).length,
+      exchange:
+        exchangeConfig[exchangeId]?.name ||
+        exchangeId,
 
-    markets: exchange.markets
+      markets,
 
-  };
+      count: Object.keys(markets || {}).length
+    };
 
+  } finally {
+    await closeExchange(exchange);
+  }
 }
-
 
 // ==========================================
 // CAPACIDADES DA CORRETORA
 // ==========================================
 
 function getExchangeCapabilities(exchangeId) {
+  if (!isSupported(exchangeId)) {
+    return {
+      id: exchangeId,
+      supported: false,
+      enabled: isEnabled(exchangeId),
+      available: false,
+      error: 'Corretora não suportada pelo CCXT.'
+    };
+  }
 
-  const exchange = createExchange(exchangeId);
+  const ExchangeClass = ccxt[exchangeId];
+
+  const exchange = new ExchangeClass({
+    enableRateLimit: true,
+    options: {
+      defaultType: 'spot'
+    }
+  });
+
+  const has = exchange.has || {};
 
   return {
-
     id: exchangeId,
 
-    name: config.EXCHANGES[exchangeId]?.name ||
+    name:
+      exchangeConfig[exchangeId]?.name ||
       exchangeId,
 
-    spot: Boolean(
-      exchange.has.fetchTicker &&
-      exchange.has.fetchOrderBook
-    ),
+    supported: true,
 
-    fetchTickers: exchange.has.fetchTickers,
+    enabled: isEnabled(exchangeId),
 
-    fetchOrderBook: exchange.has.fetchOrderBook,
+    available: isEnabled(exchangeId),
 
-    websocket: Boolean(
-      exchange.has.watchTicker
-    ),
+    spot: true,
+
+    fetchTicker:
+      has.fetchTicker === true,
+
+    fetchTickers:
+      has.fetchTickers === true,
+
+    fetchOrderBook:
+      has.fetchOrderBook === true,
+
+    watchTicker:
+      has.watchTicker === true,
 
     authenticated: false,
 
     realOrdersEnabled: false
-
   };
-
 }
-
-
-// ==========================================
-// LIMPAR CACHE
-// ==========================================
-
-function clearExchangeCache(exchangeId) {
-
-  if (exchangeId) {
-
-    const exchange = exchangeCache.get(exchangeId);
-
-    if (exchange && typeof exchange.close === 'function') {
-      exchange.close().catch(() => {});
-    }
-
-    exchangeCache.delete(exchangeId);
-
-    return true;
-  }
-
-  for (const exchange of exchangeCache.values()) {
-
-    if (typeof exchange.close === 'function') {
-      exchange.close().catch(() => {});
-    }
-
-  }
-
-  exchangeCache.clear();
-
-  return true;
-
-}
-
 
 // ==========================================
 // EXPORTAÇÕES
 // ==========================================
 
 module.exports = {
-
   createExchange,
 
-  isSupported,
+  closeExchange,
+
+  clearExchangeCache,
 
   getSupportedExchanges,
 
@@ -223,6 +266,7 @@ module.exports = {
 
   getExchangeCapabilities,
 
-  clearExchangeCache
+  isSupported,
 
+  isEnabled
 };
