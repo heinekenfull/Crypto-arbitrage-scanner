@@ -13,8 +13,8 @@ const {
 } = require('./simulation');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.2.1
-// SPOT + SIMULAÇÃO
+// CRYPTO ARBITRAGE SCANNER 6.2.2
+// SPOT + SIMULAÇÃO USD / BRL
 // CONEXÕES REUTILIZADAS POR CICLO
 // ==========================================
 
@@ -24,6 +24,8 @@ const ARBITRAGE = config.ARBITRAGE || {};
 const QUOTE_CURRENCIES = ['USDT', 'USDC', 'USD', 'BRL'];
 const STABLE_CURRENCIES = ['USD', 'USDT', 'USDC'];
 
+const ALLOWED_BUDGET_VALUES = [50, 100, 150, 250, 500];
+
 function finiteNumber(value, fallback, min = 0) {
   const number = Number(value);
 
@@ -32,16 +34,42 @@ function finiteNumber(value, fallback, min = 0) {
     : fallback;
 }
 
-const configuredBudgets =
-  SIMULATION.TRADE_BUDGETS_USD || [50, 100, 150, 250, 500, 1000];
 
-const BUDGETS = configuredBudgets
-  .map(Number)
-  .filter(value => Number.isFinite(value) && value > 0);
+// ==========================================
+// ORÇAMENTOS USD E BRL
+// ==========================================
 
-if (BUDGETS.length === 0) {
-  BUDGETS.push(50, 100, 150, 250, 500, 1000);
+function normalizeBudgets(configured, fallback) {
+  const source = Array.isArray(configured)
+    ? configured
+    : fallback;
+
+  const budgets = source
+    .map(Number)
+    .filter(value =>
+      Number.isFinite(value) &&
+      ALLOWED_BUDGET_VALUES.includes(value)
+    );
+
+  return budgets.length > 0
+    ? [...new Set(budgets)].sort((a, b) => a - b)
+    : [...ALLOWED_BUDGET_VALUES];
 }
+
+const BUDGETS_USD = normalizeBudgets(
+  SIMULATION.TRADE_BUDGETS_USD,
+  ALLOWED_BUDGET_VALUES
+);
+
+const BUDGETS_BRL = normalizeBudgets(
+  SIMULATION.TRADE_BUDGETS_BRL,
+  ALLOWED_BUDGET_VALUES
+);
+
+
+// ==========================================
+// CONFIGURAÇÕES
+// ==========================================
 
 const MAX_CANDIDATES = Math.max(
   1,
@@ -251,7 +279,6 @@ function getMarketFee(exchangeId, market) {
     Number.isFinite(Number(market.taker)) &&
     Number(market.taker) >= 0
   ) {
-    // CCXT: 0.001 = 0.10%
     return Number(market.taker) * 100;
   }
 
@@ -417,7 +444,7 @@ async function fetchTickerChunk(exchange, exchangeId, markets) {
 
 // ==========================================
 // CONSULTAR UMA CORRETORA
-// Aceita instância compartilhada
+// ACEITA INSTÂNCIA COMPARTILHADA
 // ==========================================
 
 async function fetchExchangePrices(exchangeId, sharedExchange = null) {
@@ -516,7 +543,10 @@ function buildConversionGraph(prices) {
       continue;
     }
 
+    // Venda da moeda-base pelo bid.
     addRate(item.base, item.quote, item.bid);
+
+    // Compra da moeda-base pelo ask.
     addRate(item.quote, item.base, 1 / item.ask);
   }
 
@@ -576,35 +606,120 @@ function findConversionRate(graph, from, to) {
 
 
 // ==========================================
-// CONVERSÃO DO ORÇAMENTO
+// CONVERSÃO COM PARIDADE DE STABLECOINS
+// A PARIDADE É SEMPRE IDENTIFICADA
 // ==========================================
 
-function findBudgetConversionRate(graph, quote) {
-  const direct = findConversionRate(
-    graph,
-    'USD',
-    quote
-  );
+function findConversionWithStableBridge(graph, from, to) {
+  const direct = findConversionRate(graph, from, to);
 
   if (
-    direct &&
+    direct !== null &&
     Number.isFinite(direct) &&
     direct > 0
   ) {
     return {
       rate: direct,
-      estimated: false
+      estimated: false,
+      route: 'direct'
     };
   }
 
-  if (STABLE_CURRENCIES.includes(quote)) {
+  if (
+    STABLE_CURRENCIES.includes(from) &&
+    STABLE_CURRENCIES.includes(to)
+  ) {
     return {
       rate: 1,
-      estimated: true
+      estimated: true,
+      route: 'stablecoin-parity'
     };
+  }
+
+  // USD pode ser aproximado por USDT/USDC,
+  // mas a conversão restante precisa existir no mercado.
+  if (from === 'USD') {
+    for (const stable of ['USDT', 'USDC']) {
+      const stableRate = findConversionRate(
+        graph,
+        stable,
+        to
+      );
+
+      if (
+        stableRate !== null &&
+        Number.isFinite(stableRate) &&
+        stableRate > 0
+      ) {
+        return {
+          rate: stableRate,
+          estimated: true,
+          route: `USD≈${stable}`
+        };
+      }
+    }
   }
 
   return null;
+}
+
+
+// ==========================================
+// CONVERSÃO DO ORÇAMENTO
+// USD -> MOEDA DO PAR
+// BRL -> MOEDA DO PAR
+// ==========================================
+
+function findBudgetConversionRate(graph, budgetCurrency, quote) {
+  const currency = String(budgetCurrency).toUpperCase();
+
+  if (currency === quote) {
+    return {
+      rate: 1,
+      estimated: false,
+      route: 'same-currency'
+    };
+  }
+
+  return findConversionWithStableBridge(
+    graph,
+    currency,
+    quote
+  );
+}
+
+
+// ==========================================
+// CONVERSÃO PARA BRL
+// ==========================================
+
+function findQuoteToBRL(graph, quote) {
+  if (quote === 'BRL') {
+    return {
+      rate: 1,
+      estimated: false,
+      route: 'same-currency'
+    };
+  }
+
+  return findConversionWithStableBridge(
+    graph,
+    quote,
+    'BRL'
+  );
+}
+
+
+// ==========================================
+// COTAÇÃO USD -> BRL
+// ==========================================
+
+function findUSDToBRL(graph) {
+  return findConversionWithStableBridge(
+    graph,
+    'USD',
+    'BRL'
+  );
 }
 
 
@@ -727,7 +842,6 @@ async function fetchOrderBookWithExchange(
   const exchange = sharedExchange || createExchange(exchangeId);
 
   try {
-    // Mercados são carregados somente se necessário.
     if (
       !exchange.markets ||
       Object.keys(exchange.markets).length === 0
@@ -857,7 +971,6 @@ async function fetchOrderBookWithExchange(
 
 // ==========================================
 // FUNÇÃO PÚBLICA DE LIVRO DE OFERTAS
-// Compatibilidade com chamadas existentes
 // ==========================================
 
 async function fetchOrderBookSnapshot(exchangeId, symbol) {
@@ -904,6 +1017,67 @@ function isSimulationValidated(simulation) {
 
 
 // ==========================================
+// CRIAR UMA SIMULAÇÃO DE ORÇAMENTO
+// ==========================================
+
+function createBudgetSimulation({
+  opportunity,
+  budgetCurrency,
+  budgetAmount,
+  budgetConversion,
+  quoteToBRL,
+  usdToBRL,
+  buyBook,
+  sellBook
+}) {
+  const budgetQuote =
+    budgetAmount * budgetConversion.rate;
+
+  const result = simulateBudget({
+    budgetCurrency,
+    budgetAmount,
+
+    budgetQuote,
+
+    buyOrderBook: buyBook,
+    sellOrderBook: sellBook,
+
+    buyFeePercent: opportunity.buyFeePercent,
+    sellFeePercent: opportunity.sellFeePercent,
+
+    quoteToBRL,
+    usdToBRL,
+
+    buyMarketLimits: buyBook.marketLimits,
+    sellMarketLimits: sellBook.marketLimits
+  });
+
+  const validated = isSimulationValidated(result);
+
+  return {
+    ...result,
+
+    validated,
+    status: validated ? 'validated' : 'rejected',
+
+    budgetCurrency,
+    budgetAmount,
+
+    quoteCurrency: opportunity.quote,
+
+    budgetConversionRate: budgetConversion.rate,
+    budgetConversionEstimated: budgetConversion.estimated,
+    budgetConversionRoute: budgetConversion.route,
+
+    quoteToBRLEstimated: quoteToBRL.estimated,
+    usdToBRLEstimated: usdToBRL
+      ? usdToBRL.estimated
+      : null
+  };
+}
+
+
+// ==========================================
 // AVALIAR OPORTUNIDADE
 // ==========================================
 
@@ -945,85 +1119,162 @@ async function evaluateCandidate(
   opportunity.buyFeePercent = buyBook.feePercent;
   opportunity.sellFeePercent = sellBook.feePercent;
 
-  const quoteToBRL = findConversionRate(
-    conversionGraph,
-    opportunity.quote,
-    'BRL'
-  );
-
-  const budgetConversion = findBudgetConversionRate(
+  // Conversão da moeda do par para BRL.
+  const quoteToBRL = findQuoteToBRL(
     conversionGraph,
     opportunity.quote
   );
 
-  if (
-    !quoteToBRL ||
-    !Number.isFinite(quoteToBRL) ||
-    quoteToBRL <= 0 ||
-    !budgetConversion
-  ) {
+  // Conversão de USD para BRL.
+  const usdToBRL = findUSDToBRL(conversionGraph);
+
+  if (!quoteToBRL) {
     throw new Error(
-      `Conversão indisponível: ${opportunity.quote} para BRL ou USD para ${opportunity.quote}`
+      `Conversão de ${opportunity.quote} para BRL indisponível`
     );
   }
 
-  opportunity.conversion = {
-    quoteToBRL,
-    usdToQuote: budgetConversion.rate,
-    budgetConversionEstimated: budgetConversion.estimated
-  };
+  if (!usdToBRL) {
+    console.warn(
+      '[SCANNER] Conversão USD/BRL indisponível. Equivalências em USD serão omitidas.'
+    );
+  }
 
   // ========================================
-  // SIMULAÇÃO DOS ORÇAMENTOS
+  // DEZ SIMULAÇÕES
+  // CINCO USD + CINCO BRL
   // ========================================
 
-  opportunity.simulations = BUDGETS.map(budgetUSD => {
-    const budgetQuote =
-      Number(budgetUSD) * budgetConversion.rate;
+  const simulations = [];
 
-    const result = simulateBudget({
-      budgetQuote,
-      budgetUSD,
+  for (const budgetUSD of BUDGETS_USD) {
+    const conversion = findBudgetConversionRate(
+      conversionGraph,
+      'USD',
+      opportunity.quote
+    );
 
-      buyOrderBook: buyBook,
-      sellOrderBook: sellBook,
+    if (!conversion) {
+      simulations.push({
+        validated: false,
+        status: 'rejected',
+        reason: `Não foi possível converter USD para ${opportunity.quote}.`,
 
-      buyFeePercent: opportunity.buyFeePercent,
-      sellFeePercent: opportunity.sellFeePercent,
+        budgetCurrency: 'USD',
+        budgetAmount: budgetUSD,
+        budgetUSD,
+        budgetBRL: null,
 
-      quoteToBRL,
+        netProfit: 0,
+        netProfitUSD: null,
+        netProfitBRL: 0,
 
-      buyMarketLimits: buyBook.marketLimits,
-      sellMarketLimits: sellBook.marketLimits
-    });
+        profitPercent: 0,
+        fillRatio: 0,
 
-    const validated = isSimulationValidated(result);
+        checks: {}
+      });
 
-    return {
-      ...result,
+      continue;
+    }
 
-      validated,
-      status: validated ? 'validated' : 'rejected',
+    simulations.push(
+      createBudgetSimulation({
+        opportunity,
+        budgetCurrency: 'USD',
+        budgetAmount: budgetUSD,
+        budgetConversion: conversion,
+        quoteToBRL: quoteToBRL.rate,
+        usdToBRL: usdToBRL?.rate || null,
+        buyBook,
+        sellBook
+      })
+    );
+  }
 
-      budgetUSD,
-      tradeBudgetUSD: budgetUSD,
+  for (const budgetBRL of BUDGETS_BRL) {
+    const conversion = findBudgetConversionRate(
+      conversionGraph,
+      'BRL',
+      opportunity.quote
+    );
 
-      quoteCurrency: opportunity.quote,
+    if (!conversion) {
+      simulations.push({
+        validated: false,
+        status: 'rejected',
+        reason: `Não foi possível converter BRL para ${opportunity.quote}.`,
 
-      budgetConversionEstimated:
-        budgetConversion.estimated
-    };
-  });
+        budgetCurrency: 'BRL',
+        budgetAmount: budgetBRL,
+        budgetUSD: usdToBRL
+          ? budgetBRL / usdToBRL.rate
+          : null,
+        budgetBRL,
 
-  const validated = opportunity.simulations.filter(
+        netProfit: 0,
+        netProfitUSD: null,
+        netProfitBRL: 0,
+
+        profitPercent: 0,
+        fillRatio: 0,
+
+        checks: {}
+      });
+
+      continue;
+    }
+
+    simulations.push(
+      createBudgetSimulation({
+        opportunity,
+        budgetCurrency: 'BRL',
+        budgetAmount: budgetBRL,
+        budgetConversion: conversion,
+        quoteToBRL: quoteToBRL.rate,
+        usdToBRL: usdToBRL?.rate || null,
+        buyBook,
+        sellBook
+      })
+    );
+  }
+
+  opportunity.simulations = simulations;
+
+  // ========================================
+  // CONTAGEM DAS APROVAÇÕES
+  // ========================================
+
+  const validated = simulations.filter(
     isSimulationValidated
   );
 
-  opportunity.validatedBudgets = validated.map(
-    simulation => simulation.budgetUSD
+  const validatedUSD = simulations.filter(
+    item =>
+      item.budgetCurrency === 'USD' &&
+      isSimulationValidated(item)
   );
 
+  const validatedBRL = simulations.filter(
+    item =>
+      item.budgetCurrency === 'BRL' &&
+      isSimulationValidated(item)
+  );
+
+  opportunity.validatedBudgets = validatedUSD.map(
+    item => item.budgetAmount
+  );
+
+  opportunity.validatedBudgetsUSD =
+    validatedUSD.map(item => item.budgetAmount);
+
+  opportunity.validatedBudgetsBRL =
+    validatedBRL.map(item => item.budgetAmount);
+
   opportunity.validatedCount = validated.length;
+
+  opportunity.validatedCountUSD = validatedUSD.length;
+  opportunity.validatedCountBRL = validatedBRL.length;
 
   opportunity.bookTimestamp = Math.min(
     buyBook.timestamp,
@@ -1038,8 +1289,20 @@ async function evaluateCandidate(
     buyBook.fetchedAt - sellBook.fetchedAt
   );
 
+  opportunity.conversion = {
+    quoteToBRL: quoteToBRL.rate,
+    quoteToBRLEstimated: quoteToBRL.estimated,
+
+    usdToBRL: usdToBRL?.rate || null,
+    usdToBRLEstimated: usdToBRL?.estimated ?? null
+  };
+
   opportunity.status =
     validated.length > 0 ? 'validated' : 'rejected';
+
+  // ========================================
+  // SIMULAÇÃO PADRÃO PARA EXIBIÇÃO
+  // ========================================
 
   const defaultBudget = finiteNumber(
     SIMULATION.DEFAULT_TRADE_BUDGET_USD,
@@ -1048,19 +1311,33 @@ async function evaluateCandidate(
   );
 
   const defaultSimulation =
-    opportunity.simulations.find(
-      item => Number(item.budgetUSD) === defaultBudget
-    ) || opportunity.simulations[0];
+    simulations.find(
+      item =>
+        item.budgetCurrency === 'USD' &&
+        Number(item.budgetAmount) === defaultBudget
+    ) ||
+    validatedUSD[0] ||
+    validatedBRL[0] ||
+    simulations[0];
 
   if (defaultSimulation) {
     opportunity.netProfitBRL =
       defaultSimulation.netProfitBRL;
+
+    opportunity.netProfitUSD =
+      defaultSimulation.netProfitUSD;
 
     opportunity.netProfitPercent =
       defaultSimulation.profitPercent;
 
     opportunity.fillRatio =
       defaultSimulation.fillRatio;
+
+    opportunity.defaultBudgetCurrency =
+      defaultSimulation.budgetCurrency;
+
+    opportunity.defaultBudgetAmount =
+      defaultSimulation.budgetAmount;
   }
 
   return opportunity;
@@ -1076,7 +1353,6 @@ async function scanMarket() {
 
   const enabledExchanges = getEnabledExchanges();
 
-  // Uma instância por corretora durante todo o ciclo.
   const exchangeInstances = new Map();
 
   console.log(
@@ -1219,6 +1495,8 @@ async function scanMarket() {
 
             simulations: [],
             validatedBudgets: [],
+            validatedBudgetsUSD: [],
+            validatedBudgetsBRL: [],
             validatedCount: 0
           };
         }
@@ -1268,6 +1546,8 @@ async function scanMarket() {
       timestamp: finishedAt,
 
       durationMs: finishedAt - startedAt,
+
+      version: '6.2.2',
 
       mode: 'SPOT',
 
@@ -1327,7 +1607,11 @@ async function scanMarket() {
         candidatesRejected: rejectedCandidates.length,
         opportunitiesApproved: validatedOpportunities.length,
 
-        budgets: BUDGETS,
+        budgetsUSD: BUDGETS_USD,
+        budgetsBRL: BUDGETS_BRL,
+
+        simulationsPerOpportunity:
+          BUDGETS_USD.length + BUDGETS_BRL.length,
 
         quoteCurrencies: QUOTE_CURRENCIES,
 
@@ -1340,7 +1624,7 @@ async function scanMarket() {
           'Spread líquido estimado positivo. A aprovação depende da simulação completa.',
 
         note:
-          'A aprovação final considera livro de ofertas, limites mínimos dos mercados, liquidez, taxas, slippage e lucro líquido. A paridade USD/stablecoin pode ser estimada quando não existe cotação direta.'
+          'A aprovação final considera livro de ofertas, limites mínimos dos mercados, liquidez, taxas, slippage e lucro líquido. Conversões por paridade de stablecoins são identificadas como estimadas.'
       }
     };
 
@@ -1396,6 +1680,10 @@ module.exports = {
   buildConversionGraph,
 
   findConversionRate,
+
+  findBudgetConversionRate,
+
+  findUSDToBRL,
 
   mapWithConcurrency,
 
