@@ -131,7 +131,7 @@ module.exports = {
 
     MAX_SLIPPAGE_PERCENT: 1.0,
 
-    MIN_BUDGET_FILL_RATIO: 0.98,
+    MIN_BUDGET_FILL_RATIO: 0.90,
 
     MIN_NET_PROFIT_BRL: 0.10
   },
