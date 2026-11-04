@@ -877,7 +877,6 @@ const server = app.listen(PORT, () => {
   console.log('Mercado: SPOT');
   console.log('Moedas: USD / BRL');
   console.log('Orçamentos USD:', BUDGETS.USD.join(', '));
-  console.log('Orçamentos BRL:', BUDGETS.BRL.join(', '));
   console.log('Ordens reais: DESABILITADAS');
   console.log('======================================');
 
