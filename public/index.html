@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crypto Arbitrage Scanner 6.0</title>
+<title>Crypto Arbitrage Scanner 6.2</title>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -46,7 +46,6 @@ th{color:#94a3b8;font-weight:normal}
 .exchange{padding:13px;background:#17263b;border-radius:8px;font-size:13px}
 .dot{margin-right:5px}
 .info-line{color:#94a3b8;font-size:13px;line-height:1.7;overflow-wrap:anywhere}
-.badge{display:inline-block;font-size:10px;padding:4px 7px;border-radius:5px;margin-top:5px;background:#263449;color:#cbd5e1}
 .result-box{background:#0c1626;border:1px solid #263449;border-radius:9px;padding:15px;margin-top:12px}
 .result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:12px}
 .result-item{background:#17263b;padding:11px;border-radius:7px}
@@ -57,16 +56,18 @@ th{color:#94a3b8;font-weight:normal}
 .empty{color:#94a3b8;font-size:13px;padding:12px 0}
 footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 @media(max-width:600px){
-.container{padding:12px}header{padding:15px}
+.container{padding:12px}
+header{padding:15px}
 .simulation-grid{grid-template-columns:repeat(2,minmax(100px,1fr))}
-.controls>*{width:100%}.control-group select{width:100%}
+.controls>*{width:100%}
+.control-group select{width:100%}
 }
 </style>
 </head>
 
 <body>
 <header>
-  <div class="logo">CRYPTO RADAR 6.0</div>
+  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.2</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
@@ -77,7 +78,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 <div class="cards">
   <div class="card"><small>Corretoras conectadas</small><h2 class="green" id="exchangeCount">0</h2></div>
   <div class="card"><small>Mercados analisados</small><h2 id="marketCount">0</h2></div>
-  <div class="card"><small>Oportunidades encontradas</small><h2 class="yellow" id="opportunityCount">0</h2></div>
+  <div class="card"><small>Oportunidades aprovadas</small><h2 class="yellow" id="opportunityCount">0</h2></div>
   <div class="card"><small>Melhor lucro líquido</small><h2 class="green" id="bestProfit">0%</h2></div>
   <div class="card"><small>Melhor lucro estimado</small><h2 class="green" id="bestProfitBRL">R$ 0,00</h2></div>
 </div>
@@ -162,7 +163,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER · MODO SIMULAÇÃO
+CRYPTO ARBITRAGE SCANNER 6.2 · MODO SPOT / SIMULAÇÃO
 <br><br>
 Nenhuma ordem real é executada.
 <br>
@@ -179,21 +180,36 @@ let lastLoadedScan = null;
 let statusRequestRunning = false;
 let dataRequestRunning = false;
 let simulationInProgress = false;
+let historyRequestRunning = false;
+let exchangeRequestRunning = false;
 
 function numberValue(value){
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
+function firstNumber(...values){
+  for(const value of values){
+    if(value !== undefined && value !== null && value !== ''){
+      const n = Number(value);
+      if(Number.isFinite(n)) return n;
+    }
+  }
+  return 0;
+}
+
 function formatBRL(value){
   return numberValue(value).toLocaleString('pt-BR',{
-    style:'currency',currency:'BRL'
+    style:'currency',
+    currency:'BRL'
   });
 }
 
 function formatUSD(value){
   return numberValue(value).toLocaleString('en-US',{
-    style:'currency',currency:'USD',maximumFractionDigits:2
+    style:'currency',
+    currency:'USD',
+    maximumFractionDigits:2
   });
 }
 
@@ -204,8 +220,10 @@ function formatPercent(value){
 function formatPrice(value){
   const n = numberValue(value);
   if(!n) return '-';
+
   return n.toLocaleString('pt-BR',{
-    minimumFractionDigits:2,maximumFractionDigits:8
+    minimumFractionDigits:2,
+    maximumFractionDigits:8
   });
 }
 
@@ -226,21 +244,33 @@ function getBudget(simulation){
 function getSimulation(opportunity,budget){
   const list = Array.isArray(opportunity.simulations)
     ? opportunity.simulations : [];
+
   return list.find(s=>Math.abs(getBudget(s)-budget)<0.01) || null;
 }
 
 function getProfitPercent(s){
   if(!s) return 0;
-  return numberValue(s.netProfitPercent ?? s.profitPercent ?? s.profitPercentage);
+
+  return firstNumber(
+    s.profitPercent,
+    s.netProfitPercent,
+    s.profitPercentage
+  );
 }
 
 function getProfitBRL(s){
   if(!s) return 0;
-  return numberValue(s.netProfitBRL ?? s.profitBRL ?? s.profit);
+
+  return firstNumber(
+    s.netProfitBRL,
+    s.profitBRL,
+    s.profit
+  );
 }
 
 function isValidated(s){
   if(!s) return false;
+
   return s.validated === true ||
     s.status === 'validated' ||
     s.status === 'approved' ||
@@ -249,10 +279,30 @@ function isValidated(s){
 
 function getFillRatio(s){
   if(!s) return null;
+
   const value = s.fillRatio ?? s.budgetFillRatio;
   if(value === undefined || value === null) return null;
+
   const n = numberValue(value);
   return n <= 1 ? n*100 : n;
+}
+
+function getBuyPrice(s){
+  return firstNumber(
+    s?.buyPrice,
+    s?.buyVWAP,
+    s?.bestBuyPrice,
+    s?.bestAsk
+  );
+}
+
+function getSellPrice(s){
+  return firstNumber(
+    s?.sellPrice,
+    s?.sellVWAP,
+    s?.bestSellPrice,
+    s?.bestBid
+  );
 }
 
 function createCell(value,className){
@@ -274,12 +324,15 @@ function createSimulationCard(simulation,budget,selected){
     ? formatBRL(getProfitBRL(simulation))
     : 'Não disponível';
 
-  if(simulation) profit.className = isValidated(simulation)?'green':'yellow';
+  if(simulation){
+    profit.className = isValidated(simulation)?'green':'yellow';
+  }
 
   const status = document.createElement('div');
   status.className = 'simulation-status';
   status.textContent = simulation
-    ? formatPercent(getProfitPercent(simulation))+' · '+safeText(simulation.status)
+    ? formatPercent(getProfitPercent(simulation))+' · '+
+      safeText(simulation.status || (isValidated(simulation)?'Aprovada':'Rejeitada'))
     : 'Sem resultado';
 
   card.append(title,profit,status);
@@ -321,28 +374,34 @@ function renderOpportunities(){
   const budget = numberValue(document.getElementById('budgetSelect').value);
   const opportunities = Array.isArray(latestData.opportunities)
     ? latestData.opportunities : [];
-  const table = document.getElementById('opportunityTable');
 
+  const table = document.getElementById('opportunityTable');
   table.innerHTML = '';
 
   document.getElementById('budgetDescription').textContent =
     'Capital selecionado: '+formatUSD(budget)+
-    '. O botão de simulação registra o resultado retornado pelo backend.';
+    '. A aprovação final depende da simulação com livro de ofertas atualizado.';
 
   const ranked = opportunities.map(item=>({
     item,
     simulation:getSimulation(item,budget)
   }));
 
-  ranked.sort((a,b)=>getProfitBRL(b.simulation)-getProfitBRL(a.simulation));
+  ranked.sort((a,b)=>
+    getProfitBRL(b.simulation)-getProfitBRL(a.simulation)
+  );
 
-  const approved = ranked.filter(row=>row.simulation && isValidated(row.simulation));
+  const approved = ranked.filter(row=>
+    row.simulation && isValidated(row.simulation)
+  );
 
-  document.getElementById('opportunityCount').textContent = opportunities.length;
+  document.getElementById('opportunityCount').textContent =
+    approved.length;
 
   if(approved.length){
     document.getElementById('bestProfit').textContent =
       formatPercent(getProfitPercent(approved[0].simulation));
+
     document.getElementById('bestProfitBRL').textContent =
       formatBRL(getProfitBRL(approved[0].simulation));
   }else{
@@ -352,8 +411,11 @@ function renderOpportunities(){
 
   if(!opportunities.length){
     const tr = document.createElement('tr');
-    tr.appendChild(createCell('Nenhuma oportunidade encontrada nesta análise.'));
+    const td = createCell('Nenhuma oportunidade encontrada nesta análise.');
+    td.colSpan = 11;
+    tr.appendChild(td);
     table.appendChild(tr);
+    selectedOpportunity = null;
     renderComparison(null);
     return;
   }
@@ -364,8 +426,15 @@ function renderOpportunities(){
     tr.appendChild(createCell(item.symbol));
     tr.appendChild(createCell(item.buyExchange));
     tr.appendChild(createCell(item.sellExchange));
-    tr.appendChild(createCell(formatPrice(item.buyPrice)));
-    tr.appendChild(createCell(formatPrice(item.sellPrice)));
+
+    tr.appendChild(createCell(
+      formatPrice(getBuyPrice(simulation) || item.buyPrice)
+    ));
+
+    tr.appendChild(createCell(
+      formatPrice(getSellPrice(simulation) || item.sellPrice)
+    ));
+
     tr.appendChild(createCell(formatUSD(budget)));
 
     if(simulation){
@@ -376,11 +445,15 @@ function renderOpportunities(){
         formatBRL(getProfitBRL(simulation)),
         approvedSimulation?'profit-cell':'loss-cell'
       ));
+
       tr.appendChild(createCell(
         formatPercent(getProfitPercent(simulation)),
         approvedSimulation?'profit-cell':'loss-cell'
       ));
-      tr.appendChild(createCell(fill===null?'-':fill.toFixed(2)+'%'));
+
+      tr.appendChild(createCell(
+        fill===null?'-':fill.toFixed(2)+'%'
+      ));
     }else{
       tr.appendChild(createCell('Sem simulação'));
       tr.appendChild(createCell('-'));
@@ -389,24 +462,30 @@ function renderOpportunities(){
 
     const detailCell = document.createElement('td');
     const detailButton = document.createElement('button');
+
     detailButton.textContent = 'VER 6 VALORES';
     detailButton.onclick = ()=>{
       selectedOpportunity = item;
       renderComparison(item);
+
       document.getElementById('comparisonArea').scrollIntoView({
-        behavior:'smooth',block:'nearest'
+        behavior:'smooth',
+        block:'nearest'
       });
     };
+
     detailCell.appendChild(detailButton);
     tr.appendChild(detailCell);
 
     const operationCell = document.createElement('td');
     const simulateButton = document.createElement('button');
+
     simulateButton.className = 'simulate';
     simulateButton.textContent = 'SIMULAR COMPRA E VENDA';
     simulateButton.disabled = simulationInProgress;
 
     simulateButton.onclick = ()=>simulateOperation(item,simulateButton);
+
     operationCell.appendChild(simulateButton);
     tr.appendChild(operationCell);
 
@@ -416,9 +495,10 @@ function renderOpportunities(){
   if(selectedOpportunity){
     const current = opportunities.find(item=>
       item.symbol===selectedOpportunity.symbol &&
-      item.buyExchange===selectedOpportunity.buyExchange &&
-      item.sellExchange===selectedOpportunity.sellExchange
+      item.buyExchangeId===selectedOpportunity.buyExchangeId &&
+      item.sellExchangeId===selectedOpportunity.sellExchangeId
     );
+
     selectedOpportunity = current || opportunities[0];
   }else{
     selectedOpportunity = opportunities[0];
@@ -429,48 +509,62 @@ function renderOpportunities(){
 
 function updateDashboard(data){
   const exchanges = Array.isArray(data.exchanges)?data.exchanges:[];
+
   const connected = data.exchangesConnected ??
-    exchanges.filter(e=>e.connected===true || e.status==='connected').length;
+    exchanges.filter(e=>
+      e.connected===true || e.status==='connected'
+    ).length;
+
   const markets = data.marketsAnalyzed ??
     exchanges.reduce((total,e)=>total+numberValue(e.markets),0);
 
   document.getElementById('exchangeCount').textContent = connected;
+
   document.getElementById('marketCount').textContent =
     numberValue(markets).toLocaleString('pt-BR');
 }
 
 function applyScanData(data){
   if(!data) return;
+
   latestData = data;
   updateDashboard(data);
   renderOpportunities();
 
   const timestamp = data.lastUpdated || data.timestamp || Date.now();
+
   document.getElementById('lastUpdate').textContent =
-    'Última atualização: '+new Date(timestamp).toLocaleString('pt-BR');
+    'Última atualização: '+
+    new Date(timestamp).toLocaleString('pt-BR');
 
   document.getElementById('scanMessage').textContent =
-    'Análise concluída. '+(data.opportunities||[]).length+
-    ' oportunidades retornadas. '+
-    (data.validatedCount!==undefined
-      ? data.validatedCount+' oportunidades aprovadas.':'');
+    'Análise concluída. '+
+    (data.opportunities||[]).length+
+    ' oportunidades aprovadas. '+
+    (data.rejectedCount!==undefined
+      ? data.rejectedCount+' candidatos rejeitados.'
+      :'');
 }
 
 async function checkServer(){
   try{
     const response = await fetch(API+'/health',{cache:'no-store'});
+
     if(!response.ok) throw new Error('Servidor indisponível');
-    await response.json();
+
+    const data = await response.json();
 
     const status = document.getElementById('serverStatus');
     status.textContent = '● SERVIDOR ONLINE';
     status.className = 'status green';
-    return true;
+
+    return data;
   }catch(error){
     const status = document.getElementById('serverStatus');
     status.textContent = '● SERVIDOR OFFLINE';
     status.className = 'status red';
-    return false;
+
+    return null;
   }
 }
 
@@ -482,22 +576,32 @@ function updateScannerState(data){
         ? 'Estado: scanner automático ativo.'
         : 'Estado: scanner pausado.';
 
-  document.getElementById('startButton').disabled = Boolean(data.scannerRunning);
-  document.getElementById('stopButton').disabled = !data.scannerRunning;
+  document.getElementById('startButton').disabled =
+    Boolean(data.scannerRunning);
+
+  document.getElementById('stopButton').disabled =
+    !data.scannerRunning;
 }
 
 async function refreshStatus(){
   if(statusRequestRunning) return;
+
   statusRequestRunning = true;
 
   try{
     const response = await fetch(API+'/api/status',{cache:'no-store'});
+
     if(!response.ok) throw new Error('Falha ao consultar status');
+
     const data = await response.json();
 
     updateScannerState(data);
 
-    if(data.scanCompletedAt && data.scanCompletedAt!==lastLoadedScan && !data.scanning){
+    if(
+      data.scanCompletedAt &&
+      data.scanCompletedAt!==lastLoadedScan &&
+      !data.scanning
+    ){
       await loadLatestResult();
     }
   }catch(error){
@@ -510,16 +614,19 @@ async function refreshStatus(){
 
 async function loadLatestResult(){
   if(dataRequestRunning) return;
+
   dataRequestRunning = true;
 
   try{
     const response = await fetch(API+'/api/scanner/last',{cache:'no-store'});
+
     if(!response.ok) throw new Error('Falha ao carregar resultado');
+
     const result = await response.json();
 
     if(result.data){
       applyScanData(result.data);
-      lastLoadedScan = result.timestamp;
+      lastLoadedScan = result.timestamp || result.data.timestamp;
     }
   }catch(error){
     document.getElementById('scanMessage').textContent =
@@ -531,6 +638,7 @@ async function loadLatestResult(){
 
 async function scan(){
   const button = document.getElementById('scanButton');
+
   button.disabled = true;
   button.textContent = 'ANALISANDO...';
 
@@ -545,9 +653,17 @@ async function scan(){
     });
 
     const data = await response.json();
-    if(!response.ok) throw new Error(data.message||data.error||'Falha na análise');
 
-    applyScanData(data);
+    if(!response.ok){
+      throw new Error(data.message||data.error||'Falha na análise');
+    }
+
+    if(data.data && !data.opportunities){
+      applyScanData(data.data);
+    }else{
+      applyScanData(data);
+    }
+
     lastLoadedScan = data.lastUpdated||data.timestamp||null;
 
     document.getElementById('scanMessage').textContent =
@@ -567,12 +683,19 @@ async function startScanner(){
   button.disabled = true;
 
   try{
-    const response = await fetch(API+'/api/scanner/start',{method:'POST'});
+    const response = await fetch(API+'/api/scanner/start',{
+      method:'POST'
+    });
+
     const data = await response.json();
-    if(!response.ok) throw new Error(data.message||'Falha ao iniciar');
+
+    if(!response.ok){
+      throw new Error(data.message||data.error||'Falha ao iniciar');
+    }
 
     document.getElementById('scanMessage').textContent =
       data.message||'Scanner iniciado.';
+
     await refreshStatus();
   }catch(error){
     document.getElementById('scanMessage').textContent =
@@ -587,16 +710,23 @@ async function stopScanner(){
   button.disabled = true;
 
   try{
-    const response = await fetch(API+'/api/scanner/stop',{method:'POST'});
+    const response = await fetch(API+'/api/scanner/stop',{
+      method:'POST'
+    });
+
     const data = await response.json();
-    if(!response.ok) throw new Error(data.message||'Falha ao pausar');
+
+    if(!response.ok){
+      throw new Error(data.message||data.error||'Falha ao pausar');
+    }
 
     document.getElementById('scanMessage').textContent =
       data.message||'Scanner pausado.';
+
     await refreshStatus();
   }catch(error){
     document.getElementById('scanMessage').textContent =
-      'Erro ao pausar scanner: '+error.message;
+      'Erro ao pausar: '+error.message;
   }finally{
     button.disabled = false;
   }
@@ -606,11 +736,18 @@ function showSimulationResult(result){
   const area = document.getElementById('simulationResult');
   area.innerHTML = '';
 
-  const simulation = result.simulation || result.data || result;
-  const approved = simulation.validated===true ||
+  const operation = result.operation || result.simulation || result.data || result;
+  const simulation =
+    operation.simulation ||
+    operation.result ||
+    operation;
+
+  const approved =
+    simulation.validated===true ||
     simulation.status==='validated' ||
     simulation.status==='approved' ||
-    simulation.status==='success';
+    simulation.status==='success' ||
+    operation.approved===true;
 
   const heading = document.createElement('h3');
   heading.className = approved?'green':'yellow';
@@ -620,25 +757,30 @@ function showSimulationResult(result){
 
   const message = document.createElement('p');
   message.className = 'info-line';
+
   message.textContent = safeText(
-    simulation.reason || result.message ||
+    simulation.reason ||
+    operation.reason ||
+    result.message ||
     'Resultado retornado pelo servidor.'
   );
 
   const grid = document.createElement('div');
   grid.className = 'result-grid';
 
+  const fill = getFillRatio(simulation);
+
   const fields = [
-    ['Lucro líquido',formatBRL(simulation.netProfitBRL)],
-    ['Rentabilidade',formatPercent(simulation.profitPercent)],
-    ['Capital investido',formatBRL(simulation.investedBRL)],
-    ['Quantidade',safeText(simulation.quantity)],
-    ['Preço médio de compra',safeText(simulation.buyPrice)],
-    ['Preço médio de venda',safeText(simulation.sellPrice)],
-    ['Taxa de compra',formatBRL(simulation.buyFee)],
-    ['Taxa de venda',formatBRL(simulation.sellFee)],
+    ['Lucro líquido',formatBRL(firstNumber(simulation.netProfitBRL,operation.netProfitBRL))],
+    ['Rentabilidade',formatPercent(firstNumber(simulation.profitPercent,simulation.netProfitPercent))],
+    ['Capital investido',formatBRL(firstNumber(simulation.investedBRL,simulation.totalBuyCostBRL,simulation.totalBuyCost))],
+    ['Quantidade',safeText(simulation.quantity ?? simulation.filledQuantity)],
+    ['Preço médio de compra',formatPrice(firstNumber(simulation.buyPrice,simulation.buyVWAP))],
+    ['Preço médio de venda',formatPrice(firstNumber(simulation.sellPrice,simulation.sellVWAP))],
+    ['Taxa de compra',formatBRL(firstNumber(simulation.buyFee,simulation.buyFeeAmount))],
+    ['Taxa de venda',formatBRL(firstNumber(simulation.sellFee,simulation.sellFeeAmount))],
     ['Slippage',formatPercent(simulation.slippagePercent)],
-    ['Preenchimento',formatPercent(numberValue(simulation.fillRatio)*100)]
+    ['Preenchimento',fill===null?'-':fill.toFixed(2)+'%']
   ];
 
   fields.forEach(([label,value])=>{
@@ -662,15 +804,19 @@ function showSimulationResult(result){
     'Simulação informativa. Nenhuma ordem real foi enviada.';
 
   area.append(heading,message,grid,disclaimer);
+
   document.getElementById('operationPanel').scrollIntoView({
-    behavior:'smooth',block:'nearest'
+    behavior:'smooth',
+    block:'nearest'
   });
 }
 
 async function simulateOperation(opportunity,button){
   if(simulationInProgress) return;
 
-  const budget = numberValue(document.getElementById('budgetSelect').value);
+  const budget = numberValue(
+    document.getElementById('budgetSelect').value
+  );
 
   if(!opportunity){
     alert('Selecione uma oportunidade válida.');
@@ -678,10 +824,7 @@ async function simulateOperation(opportunity,button){
   }
 
   if(!opportunity.buyExchangeId || !opportunity.sellExchangeId){
-    alert(
-      'Esta oportunidade não contém os identificadores das corretoras. '+
-      'O backend precisa fornecer buyExchangeId e sellExchangeId.'
-    );
+    alert('A oportunidade não contém os identificadores das corretoras.');
     return;
   }
 
@@ -689,7 +832,9 @@ async function simulateOperation(opportunity,button){
   button.disabled = true;
   button.textContent = 'SIMULANDO...';
 
-  document.querySelectorAll('.simulate').forEach(btn=>btn.disabled=true);
+  document.querySelectorAll('.simulate').forEach(btn=>{
+    btn.disabled = true;
+  });
 
   document.getElementById('simulationResult').textContent =
     'Enviando solicitação de simulação ao servidor...';
@@ -699,11 +844,11 @@ async function simulateOperation(opportunity,button){
       symbol:opportunity.symbol,
       buyExchangeId:opportunity.buyExchangeId,
       sellExchangeId:opportunity.sellExchangeId,
-      budgetUSD:budget,
-      opportunity:opportunity
+      budgetUSD:budget
     };
 
-    const response = await fetch(API+'/api/simulations',{
+    // Utiliza a rota POST singular do backend 6.2.
+    const response = await fetch(API+'/api/simulation',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(payload),
@@ -713,7 +858,12 @@ async function simulateOperation(opportunity,button){
     const data = await response.json();
 
     if(!response.ok){
-      throw new Error(data.message||data.error||'O servidor recusou a simulação.');
+      throw new Error(
+        data.message||
+        data.error||
+        data.reason||
+        'O servidor recusou a simulação.'
+      );
     }
 
     showSimulationResult(data);
@@ -734,14 +884,24 @@ async function simulateOperation(opportunity,button){
 }
 
 async function loadSimulationHistory(){
+  if(historyRequestRunning) return;
+
+  historyRequestRunning = true;
+
   const container = document.getElementById('simulationHistory');
   container.textContent = 'Carregando histórico...';
 
   try{
-    const response = await fetch(API+'/api/simulations',{cache:'no-store'});
-    if(!response.ok) throw new Error('Falha ao consultar histórico');
+    const response = await fetch(API+'/api/simulations',{
+      cache:'no-store'
+    });
+
+    if(!response.ok){
+      throw new Error('Falha ao consultar histórico');
+    }
 
     const data = await response.json();
+
     const history = Array.isArray(data)
       ? data
       : data.simulations || data.history || data.records || [];
@@ -757,20 +917,45 @@ async function loadSimulationHistory(){
       const item = document.createElement('div');
       item.className = 'history-item';
 
-      const symbol = safeText(record.symbol || record.opportunity?.symbol);
-      const buy = safeText(record.buyExchange || record.buyExchangeId);
-      const sell = safeText(record.sellExchange || record.sellExchangeId);
-      const budget = formatUSD(record.budgetUSD || record.budget);
-      const profit = formatBRL(
-        record.netProfitBRL ??
-        record.simulation?.netProfitBRL ??
-        record.result?.netProfitBRL
-      );
-      const status = safeText(
-        record.status || record.simulation?.status || 'registrada'
+      const simulation =
+        record.simulation ||
+        record.result ||
+        record;
+
+      const symbol = safeText(
+        record.symbol || record.opportunity?.symbol
       );
 
-      const dateValue = record.createdAt || record.timestamp || record.date;
+      const buy = safeText(
+        record.buyExchange || record.buyExchangeId
+      );
+
+      const sell = safeText(
+        record.sellExchange || record.sellExchangeId
+      );
+
+      const budget = formatUSD(
+        firstNumber(record.budgetUSD,record.budget)
+      );
+
+      const profit = formatBRL(
+        firstNumber(
+          record.netProfitBRL,
+          simulation.netProfitBRL
+        )
+      );
+
+      const status = safeText(
+        record.status ||
+        simulation.status ||
+        (record.approved===true?'approved':'registrada')
+      );
+
+      const dateValue =
+        record.createdAt ||
+        record.timestamp ||
+        record.date;
+
       const date = dateValue
         ? new Date(dateValue).toLocaleString('pt-BR')
         : 'Data não informada';
@@ -786,15 +971,26 @@ async function loadSimulationHistory(){
   }catch(error){
     container.textContent =
       'Não foi possível carregar o histórico: '+error.message;
+  }finally{
+    historyRequestRunning = false;
   }
 }
 
 async function loadExchanges(){
+  if(exchangeRequestRunning) return;
+
+  exchangeRequestRunning = true;
+
   const container = document.getElementById('exchangeList');
 
   try{
-    const response = await fetch(API+'/api/exchanges',{cache:'no-store'});
-    if(!response.ok) throw new Error('Falha ao consultar corretoras');
+    const response = await fetch(API+'/api/exchanges',{
+      cache:'no-store'
+    });
+
+    if(!response.ok){
+      throw new Error('Falha ao consultar corretoras');
+    }
 
     const data = await response.json();
     container.innerHTML = '';
@@ -818,10 +1014,11 @@ async function loadExchanges(){
       }
 
       item.appendChild(dot);
-      item.appendChild(document.createTextNode(exchange.name));
+      item.appendChild(document.createTextNode(exchange.name||exchange.id));
 
       const details = document.createElement('div');
       details.className = 'simulation-status';
+
       details.textContent = !exchange.enabled
         ? 'Desativada'
         : exchange.connected
@@ -832,7 +1029,9 @@ async function loadExchanges(){
       container.appendChild(item);
     });
   }catch(error){
-    container.textContent = 'Erro ao carregar corretoras.';
+    container.textContent = 'Erro ao carregar corretoras: '+error.message;
+  }finally{
+    exchangeRequestRunning = false;
   }
 }
 
