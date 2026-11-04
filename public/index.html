@@ -62,6 +62,7 @@ header{padding:15px}
 .controls>*{width:100%}
 .control-group select{width:100%}
 }
+.mode-active{background:#087c60!important;border-color:#087c60!important}.mode-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
 </style>
 </head>
 
@@ -73,6 +74,12 @@ header{padding:15px}
 </header>
 
 <div class="container">
+<div class="controls" style="margin-top:0">
+  <button class="primary" id="spotModeButton">MODO SPOT</button>
+  <button class="secondary" id="dexModeButton">MODO DEX MULTICHAIN</button>
+</div>
+<div id="spotMode">
+
 
 <h2>Dashboard de Arbitragem Spot</h2>
 
@@ -124,7 +131,6 @@ header{padding:15px}
 
 </div>
 
-<div class="panel" id="dexPanel"><h2>DEX Multichain</h2><p class="panel-description">Monitoramento informativo de pools em Ethereum, BNB Chain, Polygon, Arbitrum, Optimism, Base, Avalanche e Solana.</p><div class="controls"><div class="control-group"><label for="dexNetworkSelect">Rede</label><select id="dexNetworkSelect"><option value="all">Todas as redes</option><option value="eth">Ethereum</option><option value="bsc">BNB Chain</option><option value="polygon_pos">Polygon</option><option value="arbitrum">Arbitrum</option><option value="optimism">Optimism</option><option value="base">Base</option><option value="avax">Avalanche</option><option value="solana">Solana</option></select></div><button class="primary" id="dexScanButton">ANALISAR DEX</button></div><p class="info-line" id="dexSummary">Aguardando consulta.</p><h3>Diferenças indicativas entre DEXs</h3><div class="table-wrap"><table><thead><tr><th>Rede</th><th>Token</th><th>DEX com menor preço</th><th>DEX com maior preço</th><th>Diferença</th></tr></thead><tbody id="dexSpreadTable"><tr><td colspan="5">Aguardando análise.</td></tr></tbody></table></div><h3 style="margin-top:16px">Pools monitorados</h3><div class="table-wrap"><table><thead><tr><th>Rede</th><th>Token / Pool</th><th>DEX</th><th>Preço USD</th><th>Liquidez USD</th><th>Volume 24h USD</th></tr></thead><tbody id="dexPoolTable"><tr><td colspan="6">Clique em ANALISAR DEX.</td></tr></tbody></table></div><div class="notice">Diferenças de preço são indicativas, não executáveis. Ainda não incluem cotação de swap, gas, impacto de preço ou MEV. Nenhuma ordem real é enviada.</div></div>
 <div class="panel">
   <h2>Oportunidades de arbitragem</h2>
   <p class="panel-description" id="budgetDescription">
@@ -204,6 +210,8 @@ header{padding:15px}
   <p class="info-line" id="scannerState">Estado: verificando servidor...</p>
 </div>
 
+</div>
+<div class="panel" id="dexPanel" style="display:none"><h2>DEX Multichain</h2><p class="panel-description">Monitoramento informativo de pools em Ethereum, BNB Chain, Polygon, Arbitrum, Optimism, Base, Avalanche e Solana.</p><div class="controls"><div class="control-group"><label for="dexNetworkSelect">Rede</label><select id="dexNetworkSelect"><option value="all">Todas as redes</option><option value="eth">Ethereum</option><option value="bsc">BNB Chain</option><option value="polygon_pos">Polygon</option><option value="arbitrum">Arbitrum</option><option value="optimism">Optimism</option><option value="base">Base</option><option value="avax">Avalanche</option><option value="solana">Solana</option></select></div><button class="primary" id="dexScanButton">ANALISAR DEX</button></div><p class="info-line" id="dexSummary">Aguardando consulta.</p><h3>Diferenças indicativas entre DEXs</h3><div class="table-wrap"><table><thead><tr><th>Rede</th><th>Token</th><th>DEX com menor preço</th><th>DEX com maior preço</th><th>Diferença</th></tr></thead><tbody id="dexSpreadTable"><tr><td colspan="5">Aguardando análise.</td></tr></tbody></table></div><h3 style="margin-top:16px">Pools monitorados</h3><div class="table-wrap"><table><thead><tr><th>Rede</th><th>Token / Pool</th><th>DEX</th><th>Preço USD</th><th>Liquidez USD</th><th>Volume 24h USD</th></tr></thead><tbody id="dexPoolTable"><tr><td colspan="6">Clique em ANALISAR DEX.</td></tr></tbody></table></div><div class="notice">Diferenças de preço são indicativas, não executáveis. Ainda não incluem cotação de swap, gas, impacto de preço ou MEV. Nenhuma ordem real é enviada.</div></div>
 </div>
 
 <footer>
@@ -1220,6 +1228,18 @@ function renderDexPools(data) {
         pool.dex,
         '
 
+document.getElementById('spotModeButton').addEventListener('click', () => {
+  document.getElementById('spotMode').style.display = '';
+  document.getElementById('dexPanel').style.display = 'none';
+  document.getElementById('spotModeButton').className = 'primary';
+  document.getElementById('dexModeButton').className = 'secondary';
+});
+document.getElementById('dexModeButton').addEventListener('click', () => {
+  document.getElementById('spotMode').style.display = 'none';
+  document.getElementById('dexPanel').style.display = '';
+  document.getElementById('spotModeButton').className = 'secondary';
+  document.getElementById('dexModeButton').className = 'primary';
+});
 document.getElementById('dexScanButton').addEventListener('click', scanDexPools);
 document.getElementById('dexNetworkSelect').addEventListener('change', () => {
   if (dexLastData) renderDexPools(dexLastData);
