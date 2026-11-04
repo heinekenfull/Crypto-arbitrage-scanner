@@ -13,8 +13,9 @@ const {
 } = require('./simulation');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.2
+// CRYPTO ARBITRAGE SCANNER 6.2.1
 // SPOT + SIMULAÇÃO
+// CONEXÕES REUTILIZADAS POR CICLO
 // ==========================================
 
 const SIMULATION = config.SIMULATION || {};
@@ -23,39 +24,79 @@ const ARBITRAGE = config.ARBITRAGE || {};
 const QUOTE_CURRENCIES = ['USDT', 'USDC', 'USD', 'BRL'];
 const STABLE_CURRENCIES = ['USD', 'USDT', 'USDC'];
 
-const BUDGETS = (
-  SIMULATION.TRADE_BUDGETS_USD || [50, 100, 150, 250, 500, 1000]
-)
+function finiteNumber(value, fallback, min = 0) {
+  const number = Number(value);
+
+  return Number.isFinite(number) && number >= min
+    ? number
+    : fallback;
+}
+
+const configuredBudgets =
+  SIMULATION.TRADE_BUDGETS_USD || [50, 100, 150, 250, 500, 1000];
+
+const BUDGETS = configuredBudgets
   .map(Number)
   .filter(value => Number.isFinite(value) && value > 0);
 
+if (BUDGETS.length === 0) {
+  BUDGETS.push(50, 100, 150, 250, 500, 1000);
+}
+
 const MAX_CANDIDATES = Math.max(
   1,
-  Number(SIMULATION.MAX_CANDIDATES_TO_VALIDATE ?? 100)
+  Math.floor(finiteNumber(
+    SIMULATION.MAX_CANDIDATES_TO_VALIDATE,
+    100,
+    1
+  ))
 );
 
 const ORDERBOOK_AGE = Math.max(
   1000,
-  Number(SIMULATION.ORDERBOOK_MAX_AGE_MS ?? 15000)
+  finiteNumber(
+    SIMULATION.ORDERBOOK_MAX_AGE_MS,
+    15000,
+    1000
+  )
 );
 
 const MAX_BOOK_SKEW = Math.max(
   500,
-  Number(SIMULATION.MAX_BOOK_SKEW_MS ?? 5000)
+  finiteNumber(
+    SIMULATION.MAX_BOOK_SKEW_MS,
+    5000,
+    500
+  )
 );
 
-const MIN_PROFIT = Number(
-  ARBITRAGE.MIN_PROFIT_PERCENT ?? 0.30
+const MIN_PROFIT = finiteNumber(
+  ARBITRAGE.MIN_PROFIT_PERCENT,
+  0.30
 );
 
-const MAX_SPREAD = Number(
-  ARBITRAGE.MAX_SPREAD_PERCENT ?? 10
+const MAX_SPREAD = finiteNumber(
+  ARBITRAGE.MAX_SPREAD_PERCENT,
+  10,
+  0.01
 );
 
 const ORDERBOOK_LIMIT =
   SIMULATION.ORDERBOOK_DEPTH || undefined;
 
 const FETCH_CONCURRENCY = 5;
+
+const VALIDATION_CONCURRENCY = Math.min(
+  6,
+  Math.max(
+    1,
+    Math.floor(finiteNumber(
+      SIMULATION.VALIDATION_CONCURRENCY,
+      4,
+      1
+    ))
+  )
+);
 
 
 // ==========================================
@@ -96,6 +137,24 @@ async function mapWithConcurrency(items, limit, callback) {
   );
 
   return results;
+}
+
+
+// ==========================================
+// FECHAMENTO SEGURO
+// ==========================================
+
+async function safeCloseExchange(exchange) {
+  if (!exchange) return;
+
+  try {
+    await closeExchange(exchange);
+  } catch (error) {
+    console.warn(
+      '[SCANNER] Erro ao fechar corretora:',
+      error.message || String(error)
+    );
+  }
 }
 
 
@@ -152,7 +211,11 @@ function getEligibleMarkets(exchange) {
 
   const maxMarkets = Math.max(
     1,
-    Number(config.MAX_MARKETS_PER_EXCHANGE || 500)
+    Math.floor(finiteNumber(
+      config.MAX_MARKETS_PER_EXCHANGE,
+      500,
+      1
+    ))
   );
 
   return [
@@ -188,13 +251,13 @@ function getMarketFee(exchangeId, market) {
     Number.isFinite(Number(market.taker)) &&
     Number(market.taker) >= 0
   ) {
-    // CCXT informa a taxa como fração.
-    // Exemplo: 0.001 = 0.10%.
+    // CCXT: 0.001 = 0.10%
     return Number(market.taker) * 100;
   }
 
-  return Number(
-    ARBITRAGE.TRADING_FEE_PERCENT ?? 0.10
+  return finiteNumber(
+    ARBITRAGE.TRADING_FEE_PERCENT,
+    0.10
   );
 }
 
@@ -354,10 +417,12 @@ async function fetchTickerChunk(exchange, exchangeId, markets) {
 
 // ==========================================
 // CONSULTAR UMA CORRETORA
+// Aceita instância compartilhada
 // ==========================================
 
-async function fetchExchangePrices(exchangeId) {
-  const exchange = createExchange(exchangeId);
+async function fetchExchangePrices(exchangeId, sharedExchange = null) {
+  const ownsExchange = !sharedExchange;
+  const exchange = sharedExchange || createExchange(exchangeId);
 
   try {
     await exchange.loadMarkets();
@@ -408,7 +473,9 @@ async function fetchExchangePrices(exchangeId) {
     throw error;
 
   } finally {
-    await closeExchange(exchange);
+    if (ownsExchange) {
+      await safeCloseExchange(exchange);
+    }
   }
 }
 
@@ -648,14 +715,25 @@ function calculateOpportunities(exchangeResults) {
 
 
 // ==========================================
-// CONSULTAR LIVRO DE OFERTAS
+// CONSULTAR LIVRO COM INSTÂNCIA EXISTENTE
 // ==========================================
 
-async function fetchOrderBookSnapshot(exchangeId, symbol) {
-  const exchange = createExchange(exchangeId);
+async function fetchOrderBookWithExchange(
+  exchangeId,
+  symbol,
+  sharedExchange = null
+) {
+  const ownsExchange = !sharedExchange;
+  const exchange = sharedExchange || createExchange(exchangeId);
 
   try {
-    await exchange.loadMarkets();
+    // Mercados são carregados somente se necessário.
+    if (
+      !exchange.markets ||
+      Object.keys(exchange.markets).length === 0
+    ) {
+      await exchange.loadMarkets();
+    }
 
     const market = exchange.markets?.[symbol];
 
@@ -770,8 +848,24 @@ async function fetchOrderBookSnapshot(exchangeId, symbol) {
     };
 
   } finally {
-    await closeExchange(exchange);
+    if (ownsExchange) {
+      await safeCloseExchange(exchange);
+    }
   }
+}
+
+
+// ==========================================
+// FUNÇÃO PÚBLICA DE LIVRO DE OFERTAS
+// Compatibilidade com chamadas existentes
+// ==========================================
+
+async function fetchOrderBookSnapshot(exchangeId, symbol) {
+  return fetchOrderBookWithExchange(
+    exchangeId,
+    symbol,
+    null
+  );
 }
 
 
@@ -813,16 +907,36 @@ function isSimulationValidated(simulation) {
 // AVALIAR OPORTUNIDADE
 // ==========================================
 
-async function evaluateCandidate(opportunity, conversionGraph) {
+async function evaluateCandidate(
+  opportunity,
+  conversionGraph,
+  exchangeInstances = null
+) {
+  const buyExchange = exchangeInstances?.get(
+    opportunity.buyExchangeId
+  );
+
+  const sellExchange = exchangeInstances?.get(
+    opportunity.sellExchangeId
+  );
+
+  if (!buyExchange || !sellExchange) {
+    throw new Error(
+      'Instância de corretora indisponível para validação'
+    );
+  }
+
   const [buyBook, sellBook] = await Promise.all([
-    fetchOrderBookSnapshot(
+    fetchOrderBookWithExchange(
       opportunity.buyExchangeId,
-      opportunity.symbol
+      opportunity.symbol,
+      buyExchange
     ),
 
-    fetchOrderBookSnapshot(
+    fetchOrderBookWithExchange(
       opportunity.sellExchangeId,
-      opportunity.symbol
+      opportunity.symbol,
+      sellExchange
     )
   ]);
 
@@ -879,7 +993,6 @@ async function evaluateCandidate(opportunity, conversionGraph) {
 
       quoteToBRL,
 
-      // Encaminha os limites reais dos mercados.
       buyMarketLimits: buyBook.marketLimits,
       sellMarketLimits: sellBook.marketLimits
     });
@@ -928,8 +1041,10 @@ async function evaluateCandidate(opportunity, conversionGraph) {
   opportunity.status =
     validated.length > 0 ? 'validated' : 'rejected';
 
-  const defaultBudget = Number(
-    SIMULATION.DEFAULT_TRADE_BUDGET_USD || 100
+  const defaultBudget = finiteNumber(
+    SIMULATION.DEFAULT_TRADE_BUDGET_USD,
+    100,
+    1
   );
 
   const defaultSimulation =
@@ -961,259 +1076,305 @@ async function scanMarket() {
 
   const enabledExchanges = getEnabledExchanges();
 
+  // Uma instância por corretora durante todo o ciclo.
+  const exchangeInstances = new Map();
+
   console.log(
     '[SCANNER] Corretoras habilitadas:',
     enabledExchanges.join(', ')
   );
 
-  // ========================================
-  // CONSULTAR CORRETORAS
-  // ========================================
+  try {
+    // ========================================
+    // CONSULTAR CORRETORAS
+    // ========================================
 
-  const exchangeResults = await mapWithConcurrency(
-    enabledExchanges,
-    config.EXCHANGE_SCAN_CONCURRENCY || 2,
-    async exchangeId => {
-      try {
-        return await fetchExchangePrices(exchangeId);
-      } catch (error) {
-        return {
-          exchangeId,
+    const exchangeResults = await mapWithConcurrency(
+      enabledExchanges,
+      config.EXCHANGE_SCAN_CONCURRENCY || 2,
+      async exchangeId => {
+        try {
+          const exchange = createExchange(exchangeId);
 
-          exchange:
-            config.EXCHANGES?.[exchangeId]?.name || exchangeId,
+          exchangeInstances.set(exchangeId, exchange);
 
-          status: 'error',
-          connected: false,
+          return await fetchExchangePrices(
+            exchangeId,
+            exchange
+          );
 
-          markets: 0,
-          availableMarkets: 0,
+        } catch (error) {
+          console.error(
+            '[SCANNER] Falha ao consultar:',
+            exchangeId,
+            error.message || String(error)
+          );
 
-          prices: [],
+          return {
+            exchangeId,
 
-          error: error.message || String(error)
-        };
+            exchange:
+              config.EXCHANGES?.[exchangeId]?.name || exchangeId,
+
+            status: 'error',
+            connected: false,
+
+            markets: 0,
+            availableMarkets: 0,
+
+            prices: [],
+
+            error: error.message || String(error)
+          };
+        }
       }
-    }
-  );
-
-  const connected = exchangeResults.filter(
-    result => result && result.connected
-  );
-
-  const totalMarkets = connected.reduce(
-    (total, result) =>
-      total + Number(result.markets || 0),
-    0
-  );
-
-  const prices = connected.flatMap(
-    result => result.prices || []
-  );
-
-  console.log(
-    '[SCANNER] Corretoras conectadas:',
-    connected.length,
-    '/',
-    enabledExchanges.length
-  );
-
-  console.log(
-    '[SCANNER] Cotações recebidas:',
-    prices.length
-  );
-
-  // ========================================
-  // CONVERSÕES
-  // ========================================
-
-  const conversionGraph = buildConversionGraph(prices);
-
-  // ========================================
-  // CANDIDATOS
-  // ========================================
-
-  const candidates = calculateOpportunities(connected);
-
-  console.log(
-    '[SCANNER] Oportunidades preliminares:',
-    candidates.length
-  );
-
-  const selectedCandidates = candidates.slice(
-    0,
-    MAX_CANDIDATES
-  );
-
-  // ========================================
-  // VALIDAR COM LIVROS
-  // ========================================
-
-  const validationResults = await mapWithConcurrency(
-    selectedCandidates,
-    SIMULATION.VALIDATION_CONCURRENCY || 2,
-    async candidate => {
-      try {
-        return await evaluateCandidate(
-          candidate,
-          conversionGraph
-        );
-      } catch (error) {
-        console.error(
-          '[SCANNER] Candidato rejeitado:',
-          candidate.symbol,
-          candidate.buyExchangeId,
-          '->',
-          candidate.sellExchangeId,
-          error.message
-        );
-
-        return {
-          ...candidate,
-
-          status: 'rejected',
-
-          error: error.message || String(error),
-
-          simulations: [],
-          validatedBudgets: [],
-          validatedCount: 0
-        };
-      }
-    }
-  );
-
-  // ========================================
-  // RESULTADOS
-  // ========================================
-
-  const validatedOpportunities = validationResults.filter(
-    item =>
-      item &&
-      item.status === 'validated' &&
-      item.validatedCount > 0
-  );
-
-  const rejectedCandidates = validationResults.filter(
-    item => item && item.status === 'rejected'
-  );
-
-  validatedOpportunities.sort((a, b) => {
-    const aBest = Math.max(
-      0,
-      ...a.simulations
-        .filter(isSimulationValidated)
-        .map(item => Number(item.netProfitBRL) || 0)
     );
 
-    const bBest = Math.max(
-      0,
-      ...b.simulations
-        .filter(isSimulationValidated)
-        .map(item => Number(item.netProfitBRL) || 0)
+    const connected = exchangeResults.filter(
+      result => result && result.connected
     );
 
-    return bBest - aBest;
-  });
+    const totalMarkets = connected.reduce(
+      (total, result) =>
+        total + Number(result.markets || 0),
+      0
+    );
 
-  // ========================================
-  // RESPOSTA
-  // ========================================
+    const prices = connected.flatMap(
+      result => result.prices || []
+    );
 
-  const finishedAt = Date.now();
+    console.log(
+      '[SCANNER] Corretoras conectadas:',
+      connected.length,
+      '/',
+      enabledExchanges.length
+    );
 
-  const result = {
-    timestamp: finishedAt,
+    console.log(
+      '[SCANNER] Cotações recebidas:',
+      prices.length
+    );
 
-    durationMs: finishedAt - startedAt,
+    // ========================================
+    // CONVERSÕES
+    // ========================================
 
-    mode: 'SPOT',
+    const conversionGraph = buildConversionGraph(prices);
 
-    exchangesConnected: connected.length,
+    // ========================================
+    // CANDIDATOS
+    // ========================================
 
-    exchanges: exchangeResults.map(item => ({
-      name: item.exchange,
-      id: item.exchangeId,
+    const candidates = calculateOpportunities(connected);
 
-      status: item.status,
-      connected: item.connected,
+    console.log(
+      '[SCANNER] Oportunidades preliminares:',
+      candidates.length
+    );
 
-      markets: item.markets || 0,
+    const selectedCandidates = candidates.slice(
+      0,
+      MAX_CANDIDATES
+    );
 
-      error: item.error || null
-    })),
+    console.log(
+      '[SCANNER] Candidatos selecionados:',
+      selectedCandidates.length,
+      '| Concorrência:',
+      VALIDATION_CONCURRENCY
+    );
 
-    marketsAnalyzed: totalMarkets,
+    // ========================================
+    // VALIDAR COM LIVROS
+    // ========================================
 
-    totalCandidates: candidates.length,
+    const validationResults = await mapWithConcurrency(
+      selectedCandidates,
+      VALIDATION_CONCURRENCY,
+      async candidate => {
+        try {
+          return await evaluateCandidate(
+            candidate,
+            conversionGraph,
+            exchangeInstances
+          );
 
-    candidatesValidated: validationResults.length,
+        } catch (error) {
+          console.warn(
+            '[SCANNER] Candidato rejeitado:',
+            candidate.symbol,
+            candidate.buyExchangeId,
+            '->',
+            candidate.sellExchangeId,
+            error.message || String(error)
+          );
 
-    rejectedCount: rejectedCandidates.length,
+          return {
+            ...candidate,
 
-    validatedCount: validatedOpportunities.length,
+            status: 'rejected',
 
-    opportunities: validatedOpportunities,
+            error: error.message || String(error),
 
-    rejectedCandidates: rejectedCandidates.map(item => ({
-      symbol: item.symbol,
+            simulations: [],
+            validatedBudgets: [],
+            validatedCount: 0
+          };
+        }
+      }
+    );
 
-      buyExchange: item.buyExchange,
-      sellExchange: item.sellExchange,
+    // ========================================
+    // RESULTADOS
+    // ========================================
 
-      buyExchangeId: item.buyExchangeId,
-      sellExchangeId: item.sellExchangeId,
+    const validatedOpportunities = validationResults.filter(
+      item =>
+        item &&
+        item.status === 'validated' &&
+        item.validatedCount > 0
+    );
 
-      grossSpreadPercent: item.grossSpreadPercent,
-      estimatedNetPercent: item.estimatedNetPercent,
+    const rejectedCandidates = validationResults.filter(
+      item => item && item.status === 'rejected'
+    );
 
-      error: item.error || null,
+    validatedOpportunities.sort((a, b) => {
+      const aBest = Math.max(
+        0,
+        ...a.simulations
+          .filter(isSimulationValidated)
+          .map(item => Number(item.netProfitBRL) || 0)
+      );
 
-      simulations: item.simulations || []
-    })),
+      const bBest = Math.max(
+        0,
+        ...b.simulations
+          .filter(isSimulationValidated)
+          .map(item => Number(item.netProfitBRL) || 0)
+      );
 
-    diagnostics: {
-      enabledExchanges: enabledExchanges.length,
-      connectedExchanges: connected.length,
+      return bBest - aBest;
+    });
+
+    // ========================================
+    // RESPOSTA
+    // ========================================
+
+    const finishedAt = Date.now();
+
+    const result = {
+      timestamp: finishedAt,
+
+      durationMs: finishedAt - startedAt,
+
+      mode: 'SPOT',
+
+      exchangesConnected: connected.length,
+
+      exchanges: exchangeResults.map(item => ({
+        name: item.exchange,
+        id: item.exchangeId,
+
+        status: item.status,
+        connected: item.connected,
+
+        markets: item.markets || 0,
+
+        error: item.error || null
+      })),
 
       marketsAnalyzed: totalMarkets,
-      tickersReceived: prices.length,
 
-      candidatesFound: candidates.length,
-      candidatesChecked: validationResults.length,
+      totalCandidates: candidates.length,
 
-      candidatesRejected: rejectedCandidates.length,
-      opportunitiesApproved: validatedOpportunities.length,
+      candidatesValidated: validationResults.length,
 
-      budgets: BUDGETS,
+      rejectedCount: rejectedCandidates.length,
 
-      quoteCurrencies: QUOTE_CURRENCIES,
+      validatedCount: validatedOpportunities.length,
 
-      configuredMinimumProfitPercent: MIN_PROFIT,
-      maximumSpreadPercent: MAX_SPREAD,
+      opportunities: validatedOpportunities,
 
-      preliminaryFilter:
-        'Spread líquido estimado positivo. A aprovação depende da simulação completa.',
+      rejectedCandidates: rejectedCandidates.map(item => ({
+        symbol: item.symbol,
 
-      note:
-        'A aprovação final considera livro de ofertas, limites mínimos dos mercados, liquidez, taxas, slippage e lucro líquido. A paridade USD/stablecoin pode ser estimada quando não existe cotação direta.'
-    }
-  };
+        buyExchange: item.buyExchange,
+        sellExchange: item.sellExchange,
 
-  console.log(
-    '[SCANNER] Finalizado em:',
-    result.durationMs,
-    'ms'
-  );
+        buyExchangeId: item.buyExchangeId,
+        sellExchangeId: item.sellExchangeId,
 
-  console.log(
-    '[SCANNER] Aprovadas:',
-    result.validatedCount,
-    '| Rejeitadas:',
-    result.rejectedCount
-  );
+        grossSpreadPercent: item.grossSpreadPercent,
+        estimatedNetPercent: item.estimatedNetPercent,
 
-  return result;
+        error: item.error || null,
+
+        simulations: item.simulations || []
+      })),
+
+      diagnostics: {
+        enabledExchanges: enabledExchanges.length,
+        connectedExchanges: connected.length,
+
+        marketsAnalyzed: totalMarkets,
+        tickersReceived: prices.length,
+
+        candidatesFound: candidates.length,
+        candidatesChecked: validationResults.length,
+
+        candidatesRejected: rejectedCandidates.length,
+        opportunitiesApproved: validatedOpportunities.length,
+
+        budgets: BUDGETS,
+
+        quoteCurrencies: QUOTE_CURRENCIES,
+
+        configuredReferenceMinimumProfitPercent: MIN_PROFIT,
+        maximumSpreadPercent: MAX_SPREAD,
+
+        validationConcurrency: VALIDATION_CONCURRENCY,
+
+        preliminaryFilter:
+          'Spread líquido estimado positivo. A aprovação depende da simulação completa.',
+
+        note:
+          'A aprovação final considera livro de ofertas, limites mínimos dos mercados, liquidez, taxas, slippage e lucro líquido. A paridade USD/stablecoin pode ser estimada quando não existe cotação direta.'
+      }
+    };
+
+    console.log(
+      '[SCANNER] Finalizado em:',
+      result.durationMs,
+      'ms'
+    );
+
+    console.log(
+      '[SCANNER] Aprovadas:',
+      result.validatedCount,
+      '| Rejeitadas:',
+      result.rejectedCount
+    );
+
+    console.log(
+      '[SCANNER] Análise concluída:',
+      result.marketsAnalyzed,
+      'mercados;',
+      result.validatedCount,
+      'oportunidades aprovadas.'
+    );
+
+    return result;
+
+  } finally {
+    // Fecha todas as instâncias somente ao final do ciclo.
+    await Promise.all(
+      Array.from(exchangeInstances.values()).map(
+        exchange => safeCloseExchange(exchange)
+      )
+    );
+  }
 }
 
 
