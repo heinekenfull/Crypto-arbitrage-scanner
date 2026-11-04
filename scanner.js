@@ -3,6 +3,7 @@ const config = require('./config');
 
 const {
   createExchange,
+  closeExchange,
   getEnabledExchanges
 } = require('./exchanges');
 
@@ -13,39 +14,34 @@ const {
 
 // ==========================================
 // CRYPTO ARBITRAGE SCANNER 6.2
-// SPOT + SIMULAÇÃO INTEGRADA
+// SPOT + SIMULAÇÃO
 // ==========================================
 
 const SIMULATION = config.SIMULATION || {};
 const ARBITRAGE = config.ARBITRAGE || {};
 
-const QUOTE_CURRENCIES = [
-  'USDT',
-  'USDC',
-  'USD',
-  'BRL'
-];
+const QUOTE_CURRENCIES = ['USDT', 'USDC', 'USD', 'BRL'];
+const STABLE_CURRENCIES = ['USD', 'USDT', 'USDC'];
 
-const STABLE_CURRENCIES = [
-  'USD',
-  'USDT',
-  'USDC'
-];
+const BUDGETS = (
+  SIMULATION.TRADE_BUDGETS_USD || [50, 100, 150, 250, 500, 1000]
+)
+  .map(Number)
+  .filter(value => Number.isFinite(value) && value > 0);
 
-const BUDGETS =
-  SIMULATION.TRADE_BUDGETS_USD ||
-  [50, 100, 150, 250, 500, 1000];
-
-const MAX_CANDIDATES = Number(
-  SIMULATION.MAX_CANDIDATES_TO_VALIDATE ?? 100
+const MAX_CANDIDATES = Math.max(
+  1,
+  Number(SIMULATION.MAX_CANDIDATES_TO_VALIDATE ?? 100)
 );
 
-const ORDERBOOK_AGE = Number(
-  SIMULATION.ORDERBOOK_MAX_AGE_MS ?? 15000
+const ORDERBOOK_AGE = Math.max(
+  1000,
+  Number(SIMULATION.ORDERBOOK_MAX_AGE_MS ?? 15000)
 );
 
-const MAX_BOOK_SKEW = Number(
-  SIMULATION.MAX_BOOK_SKEW_MS ?? 5000
+const MAX_BOOK_SKEW = Math.max(
+  500,
+  Number(SIMULATION.MAX_BOOK_SKEW_MS ?? 5000)
 );
 
 const MIN_PROFIT = Number(
@@ -66,13 +62,12 @@ const FETCH_CONCURRENCY = 5;
 // CONCORRÊNCIA CONTROLADA
 // ==========================================
 
-async function mapWithConcurrency(
-  items,
-  limit,
-  callback
-) {
-  const results = new Array(items.length);
+async function mapWithConcurrency(items, limit, callback) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return [];
+  }
 
+  const results = new Array(items.length);
   let currentIndex = 0;
 
   async function worker() {
@@ -82,10 +77,7 @@ async function mapWithConcurrency(
       if (index >= items.length) return;
 
       try {
-        results[index] = await callback(
-          items[index],
-          index
-        );
+        results[index] = await callback(items[index], index);
       } catch (error) {
         results[index] = {
           error: error.message || String(error)
@@ -99,26 +91,20 @@ async function mapWithConcurrency(
     items.length
   );
 
-  const workers = [];
-
-  for (let i = 0; i < workerCount; i++) {
-    workers.push(worker());
-  }
-
-  await Promise.all(workers);
+  await Promise.all(
+    Array.from({ length: workerCount }, () => worker())
+  );
 
   return results;
 }
 
 
 // ==========================================
-// IDENTIFICAÇÃO DE MERCADOS SPOT
+// MERCADOS SPOT
 // ==========================================
 
 function isSpotMarket(market) {
-  if (!market || market.active === false) {
-    return false;
-  }
+  if (!market || market.active === false) return false;
 
   if (
     market.spot === false ||
@@ -130,39 +116,34 @@ function isSpotMarket(market) {
     return false;
   }
 
-  if (!market.base || !market.quote) {
-    return false;
-  }
+  if (!market.base || !market.quote) return false;
 
-  if (!QUOTE_CURRENCIES.includes(market.quote)) {
-    return false;
-  }
-
-  return true;
+  return QUOTE_CURRENCIES.includes(
+    String(market.quote).toUpperCase()
+  );
 }
 
 
 // ==========================================
-// SELEÇÃO DOS MERCADOS
+// SELEÇÃO DE MERCADOS
 // ==========================================
 
 function getEligibleMarkets(exchange) {
-  const markets = Object.values(
-    exchange.markets || {}
-  );
+  const markets = Object.values(exchange.markets || {})
+    .filter(isSpotMarket);
 
-  const eligible = markets.filter(isSpotMarket);
-
-  // Prioriza mercados de conversão para BRL.
-  const conversionMarkets = eligible.filter(
+  const conversionMarkets = markets.filter(
     market =>
       STABLE_CURRENCIES.includes(market.base) &&
       market.quote === 'BRL'
   );
 
-  const remaining = eligible.filter(
-    market =>
-      !conversionMarkets.includes(market)
+  const conversionSymbols = new Set(
+    conversionMarkets.map(market => market.symbol)
+  );
+
+  const remaining = markets.filter(
+    market => !conversionSymbols.has(market.symbol)
   );
 
   const maxMarkets = Math.max(
@@ -178,7 +159,7 @@ function getEligibleMarkets(exchange) {
 
 
 // ==========================================
-// TAXAS DAS CORRETORAS
+// TAXAS
 // ==========================================
 
 function getMarketFee(exchangeId, market) {
@@ -213,16 +194,11 @@ function getMarketFee(exchangeId, market) {
 
 
 // ==========================================
-// NORMALIZAÇÃO DE COTAÇÕES
+// NORMALIZAÇÃO DE TICKERS
 // ==========================================
 
-function normalizeTicker(
-  exchangeId,
-  exchange,
-  market,
-  ticker
-) {
-  if (!ticker) return null;
+function normalizeTicker(exchangeId, market, ticker) {
+  if (!ticker || !market) return null;
 
   const bid = Number(ticker.bid);
   const ask = Number(ticker.ask);
@@ -246,8 +222,7 @@ function normalizeTicker(
       : Number(ticker.timestamp);
 
   const timestamp =
-    Number.isFinite(sourceTimestamp) &&
-    sourceTimestamp > 0
+    Number.isFinite(sourceTimestamp) && sourceTimestamp > 0
       ? sourceTimestamp
       : receivedAt;
 
@@ -262,11 +237,9 @@ function normalizeTicker(
     exchangeId,
 
     exchange:
-      config.EXCHANGES[exchangeId]?.name ||
-      exchangeId,
+      config.EXCHANGES?.[exchangeId]?.name || exchangeId,
 
     symbol: market.symbol,
-
     base: market.base,
     quote: market.quote,
 
@@ -275,13 +248,9 @@ function normalizeTicker(
 
     last: Number(ticker.last) || null,
 
-    feePercent: getMarketFee(
-      exchangeId,
-      market
-    ),
+    feePercent: getMarketFee(exchangeId, market),
 
-    quoteVolume:
-      Number(ticker.quoteVolume) || 0,
+    quoteVolume: Number(ticker.quoteVolume) || 0,
 
     timestamp,
     receivedAt,
@@ -294,25 +263,14 @@ function normalizeTicker(
 
 
 // ==========================================
-// CONSULTA INDIVIDUAL DE TICKER
+// TICKER INDIVIDUAL
 // ==========================================
 
-async function fetchSingleTicker(
-  exchange,
-  exchangeId,
-  market
-) {
+async function fetchSingleTicker(exchange, exchangeId, market) {
   try {
-    const ticker = await exchange.fetchTicker(
-      market.symbol
-    );
+    const ticker = await exchange.fetchTicker(market.symbol);
 
-    return normalizeTicker(
-      exchangeId,
-      exchange,
-      market,
-      ticker
-    );
+    return normalizeTicker(exchangeId, market, ticker);
   } catch (error) {
     return {
       error: error.message || String(error),
@@ -324,20 +282,16 @@ async function fetchSingleTicker(
 
 
 // ==========================================
-// CONSULTA DE TICKERS EM LOTES
+// TICKERS EM LOTES
 // ==========================================
 
-async function fetchTickerChunk(
-  exchange,
-  exchangeId,
-  markets
-) {
+async function fetchTickerChunk(exchange, exchangeId, markets) {
   const results = [];
   const receivedSymbols = new Set();
 
   if (
     exchange.has &&
-    exchange.has.fetchTickers
+    exchange.has.fetchTickers === true
   ) {
     try {
       const tickers = await exchange.fetchTickers(
@@ -349,7 +303,6 @@ async function fetchTickerChunk(
 
         const normalized = normalizeTicker(
           exchangeId,
-          exchange,
           market,
           ticker
         );
@@ -361,32 +314,24 @@ async function fetchTickerChunk(
       }
     } catch (error) {
       console.warn(
-        '[SCANNER] Consulta em lote falhou:',
+        '[SCANNER] Falha no lote:',
         exchangeId,
         error.message
       );
     }
   }
 
-  // CORREÇÃO:
-  // Busca individualmente os mercados que faltaram.
   const missingMarkets = markets.filter(
-    market =>
-      !receivedSymbols.has(market.symbol)
+    market => !receivedSymbols.has(market.symbol)
   );
 
   if (missingMarkets.length > 0) {
-    const individualResults =
-      await mapWithConcurrency(
-        missingMarkets,
-        FETCH_CONCURRENCY,
-        async market =>
-          fetchSingleTicker(
-            exchange,
-            exchangeId,
-            market
-          )
-      );
+    const individualResults = await mapWithConcurrency(
+      missingMarkets,
+      FETCH_CONCURRENCY,
+      market =>
+        fetchSingleTicker(exchange, exchangeId, market)
+    );
 
     for (const item of individualResults) {
       if (item && !item.error) {
@@ -400,7 +345,7 @@ async function fetchTickerChunk(
 
 
 // ==========================================
-// CONSULTA DE UMA CORRETORA
+// CONSULTAR UMA CORRETORA
 // ==========================================
 
 async function fetchExchangePrices(exchangeId) {
@@ -410,7 +355,6 @@ async function fetchExchangePrices(exchangeId) {
     await exchange.loadMarkets();
 
     const markets = getEligibleMarkets(exchange);
-
     const allPrices = [];
 
     const chunkSize = 100;
@@ -420,10 +364,7 @@ async function fetchExchangePrices(exchangeId) {
       start < markets.length;
       start += chunkSize
     ) {
-      const chunk = markets.slice(
-        start,
-        start + chunkSize
-      );
+      const chunk = markets.slice(start, start + chunkSize);
 
       const prices = await fetchTickerChunk(
         exchange,
@@ -438,14 +379,12 @@ async function fetchExchangePrices(exchangeId) {
       exchangeId,
 
       exchange:
-        config.EXCHANGES[exchangeId]?.name ||
-        exchangeId,
+        config.EXCHANGES?.[exchangeId]?.name || exchangeId,
 
       status: 'connected',
       connected: true,
 
       markets: allPrices.length,
-
       availableMarkets: markets.length,
 
       prices: allPrices
@@ -461,16 +400,7 @@ async function fetchExchangePrices(exchangeId) {
     throw error;
 
   } finally {
-    if (
-      exchange &&
-      typeof exchange.close === 'function'
-    ) {
-      try {
-        await exchange.close();
-      } catch (error) {
-        // Não interrompe o scanner por erro ao fechar.
-      }
-    }
+    await closeExchange(exchange);
   }
 }
 
@@ -492,9 +422,7 @@ function buildConversionGraph(prices) {
       return;
     }
 
-    if (!graph[from]) {
-      graph[from] = [];
-    }
+    if (!graph[from]) graph[from] = [];
 
     graph[from].push({
       currency: to,
@@ -504,6 +432,7 @@ function buildConversionGraph(prices) {
 
   for (const item of prices || []) {
     if (
+      !item ||
       !Number.isFinite(item.bid) ||
       !Number.isFinite(item.ask) ||
       item.bid <= 0 ||
@@ -512,19 +441,8 @@ function buildConversionGraph(prices) {
       continue;
     }
 
-    // Venda da moeda base.
-    addRate(
-      item.base,
-      item.quote,
-      item.bid
-    );
-
-    // Compra da moeda base.
-    addRate(
-      item.quote,
-      item.base,
-      1 / item.ask
-    );
+    addRate(item.base, item.quote, item.bid);
+    addRate(item.quote, item.base, 1 / item.ask);
   }
 
   return graph;
@@ -532,73 +450,61 @@ function buildConversionGraph(prices) {
 
 
 // ==========================================
-// LOCALIZAR TAXA DE CONVERSÃO
+// MELHOR TAXA DE CONVERSÃO
 // ==========================================
 
-function findConversionRate(
-  graph,
-  from,
-  to
-) {
+function findConversionRate(graph, from, to) {
   if (from === to) return 1;
+  if (!graph || !graph[from]) return null;
 
-  if (!graph[from]) return null;
+  let bestRate = null;
 
-  const queue = [{
-    currency: from,
-    rate: 1,
-    depth: 0
-  }];
+  function search(currency, rate, depth, visited) {
+    if (depth >= 4) return;
 
-  const visited = new Set([from]);
+    for (const edge of graph[currency] || []) {
+      if (visited.has(edge.currency)) continue;
 
-  while (queue.length > 0) {
-    const current = queue.shift();
-
-    if (current.depth >= 4) continue;
-
-    for (
-      const edge of graph[current.currency] || []
-    ) {
-      if (visited.has(edge.currency)) {
-        continue;
-      }
-
-      const rate = current.rate * edge.rate;
+      const nextRate = rate * edge.rate;
 
       if (
-        !Number.isFinite(rate) ||
-        rate <= 0
+        !Number.isFinite(nextRate) ||
+        nextRate <= 0
       ) {
         continue;
       }
 
       if (edge.currency === to) {
-        return rate;
+        if (bestRate === null || nextRate > bestRate) {
+          bestRate = nextRate;
+        }
+
+        continue;
       }
 
-      visited.add(edge.currency);
+      const nextVisited = new Set(visited);
+      nextVisited.add(edge.currency);
 
-      queue.push({
-        currency: edge.currency,
-        rate,
-        depth: current.depth + 1
-      });
+      search(
+        edge.currency,
+        nextRate,
+        depth + 1,
+        nextVisited
+      );
     }
   }
 
-  return null;
+  search(from, 1, 0, new Set([from]));
+
+  return bestRate;
 }
 
 
 // ==========================================
-// CONVERSÃO DO ORÇAMENTO USD
+// CONVERSÃO DO ORÇAMENTO
 // ==========================================
 
-function findBudgetConversionRate(
-  graph,
-  quote
-) {
+function findBudgetConversionRate(graph, quote) {
   const direct = findConversionRate(
     graph,
     'USD',
@@ -616,7 +522,6 @@ function findBudgetConversionRate(
     };
   }
 
-  // Paridade aproximada para stablecoins.
   if (STABLE_CURRENCIES.includes(quote)) {
     return {
       rate: 1,
@@ -629,22 +534,24 @@ function findBudgetConversionRate(
 
 
 // ==========================================
-// IDENTIFICAÇÃO DE OPORTUNIDADES
+// IDENTIFICAR OPORTUNIDADES
 // ==========================================
 
 function calculateOpportunities(exchangeResults) {
-  const prices = exchangeResults.flatMap(
+  const prices = (exchangeResults || []).flatMap(
     result => result?.prices || []
   );
 
   const grouped = {};
 
   for (const item of prices) {
-    if (!grouped[item.symbol]) {
-      grouped[item.symbol] = [];
-    }
+    if (!item || !item.base || !item.quote) continue;
 
-    grouped[item.symbol].push(item);
+    const key = `${item.base}/${item.quote}`;
+
+    if (!grouped[key]) grouped[key] = [];
+
+    grouped[key].push(item);
   }
 
   const opportunities = [];
@@ -661,11 +568,7 @@ function calculateOpportunities(exchangeResults) {
         const buy = markets[i];
         const sell = markets[j];
 
-        if (
-          buy.exchangeId === sell.exchangeId
-        ) {
-          continue;
-        }
+        if (buy.exchangeId === sell.exchangeId) continue;
 
         if (
           buy.base !== sell.base ||
@@ -686,20 +589,17 @@ function calculateOpportunities(exchangeResults) {
         }
 
         const fees =
-          buy.feePercent +
-          sell.feePercent;
+          Number(buy.feePercent || 0) +
+          Number(sell.feePercent || 0);
 
-        const estimatedNet =
-          grossSpread - fees;
+        const estimatedNet = grossSpread - fees;
 
-        // Filtro preliminar.
-        // A aprovação final é feita pelo livro de ofertas.
-        if (estimatedNet < MIN_PROFIT) {
-          continue;
-        }
+        // O filtro preliminar não usa o mínimo final de lucro.
+        // A aprovação financeira fica para o livro de ofertas.
+        if (estimatedNet <= 0) continue;
 
         opportunities.push({
-          symbol,
+          symbol: buy.symbol,
 
           base: buy.base,
           quote: buy.quote,
@@ -717,9 +617,7 @@ function calculateOpportunities(exchangeResults) {
           sellFeePercent: sell.feePercent,
 
           grossSpreadPercent: grossSpread,
-
           estimatedFeePercent: fees,
-
           estimatedNetPercent: estimatedNet,
 
           buyTimestamp: buy.timestamp,
@@ -728,11 +626,8 @@ function calculateOpportunities(exchangeResults) {
           buyReceivedAt: buy.receivedAt,
           sellReceivedAt: sell.receivedAt,
 
-          buyTimestampEstimated:
-            buy.timestampEstimated,
-
-          sellTimestampEstimated:
-            sell.timestampEstimated,
+          buyTimestampEstimated: buy.timestampEstimated,
+          sellTimestampEstimated: sell.timestampEstimated,
 
           simulations: []
         });
@@ -741,30 +636,41 @@ function calculateOpportunities(exchangeResults) {
   }
 
   return opportunities.sort(
-    (a, b) =>
-      b.estimatedNetPercent -
-      a.estimatedNetPercent
+    (a, b) => b.estimatedNetPercent - a.estimatedNetPercent
   );
 }
 
 
 // ==========================================
-// CONSULTA DO LIVRO DE OFERTAS
+// CONSULTAR LIVRO DE OFERTAS
 // ==========================================
 
-async function fetchOrderBookSnapshot(
-  exchangeId,
-  symbol
-) {
+async function fetchOrderBookSnapshot(exchangeId, symbol) {
   const exchange = createExchange(exchangeId);
 
   try {
-    // Carrega mercados antes da consulta.
     await exchange.loadMarkets();
 
-    if (!exchange.markets[symbol]) {
+    const market = exchange.markets?.[symbol];
+
+    if (!market) {
       throw new Error(
         `Mercado ${symbol} não encontrado em ${exchangeId}`
+      );
+    }
+
+    if (!isSpotMarket(market)) {
+      throw new Error(
+        `Mercado ${symbol} não é SPOT em ${exchangeId}`
+      );
+    }
+
+    if (
+      !exchange.has ||
+      exchange.has.fetchOrderBook !== true
+    ) {
+      throw new Error(
+        `A corretora ${exchangeId} não disponibiliza livro de ofertas`
       );
     }
 
@@ -799,32 +705,24 @@ async function fetchOrderBookSnapshot(
       ])
       .sort((a, b) => b[0] - a[0]);
 
-    const normalizedBook = {
-      asks,
-      bids
-    };
+    const normalizedBook = { asks, bids };
 
-    const validation = validateOrderBook(
-      normalizedBook
-    );
+    const validation = validateOrderBook(normalizedBook);
 
     if (!validation.valid) {
       throw new Error(validation.reason);
     }
 
     const sourceTimestamp =
-      book.timestamp === undefined ||
-      book.timestamp === null
+      book.timestamp === undefined || book.timestamp === null
         ? null
         : Number(book.timestamp);
 
     const timestamp =
-      Number.isFinite(sourceTimestamp) &&
-      sourceTimestamp > 0
+      Number.isFinite(sourceTimestamp) && sourceTimestamp > 0
         ? sourceTimestamp
         : fetchedAt;
 
-    // Verifica horário de origem quando disponível.
     if (
       timestamp > fetchedAt + 60000 ||
       fetchedAt - timestamp > ORDERBOOK_AGE
@@ -834,10 +732,9 @@ async function fetchOrderBookSnapshot(
       );
     }
 
-    // Verifica também quanto demorou a consulta.
-    if (
-      fetchedAt - startedAt > ORDERBOOK_AGE
-    ) {
+    const requestDurationMs = fetchedAt - startedAt;
+
+    if (requestDurationMs > ORDERBOOK_AGE) {
       throw new Error(
         'Consulta do livro de ofertas demorou demais'
       );
@@ -849,49 +746,39 @@ async function fetchOrderBookSnapshot(
 
       timestamp,
       fetchedAt,
-
-      requestDurationMs:
-        fetchedAt - startedAt,
+      requestDurationMs,
 
       timestampEstimated:
         sourceTimestamp === null ||
-        !Number.isFinite(sourceTimestamp)
+        !Number.isFinite(sourceTimestamp),
+
+      feePercent: getMarketFee(exchangeId, market),
+
+      marketLimits: {
+        amount: market.limits?.amount || null,
+        price: market.limits?.price || null,
+        cost: market.limits?.cost || null
+      }
     };
 
   } finally {
-    if (
-      exchange &&
-      typeof exchange.close === 'function'
-    ) {
-      try {
-        await exchange.close();
-      } catch (error) {
-        // Ignora falha ao fechar conexão.
-      }
-    }
+    await closeExchange(exchange);
   }
 }
 
 
 // ==========================================
-// VALIDAR SINCRONIZAÇÃO DOS LIVROS
+// SINCRONIZAÇÃO DOS LIVROS
 // ==========================================
 
-function validateBookSynchronization(
-  buyBook,
-  sellBook
-) {
-  // IMPORTANTE:
-  // Usa fetchedAt, que é o relógio local do servidor.
-  // Evita rejeição por relógios diferentes das corretoras.
-
+function validateBookSynchronization(buyBook, sellBook) {
   const difference = Math.abs(
     buyBook.fetchedAt - sellBook.fetchedAt
   );
 
   if (difference > MAX_BOOK_SKEW) {
     throw new Error(
-      `Livros de ofertas fora de sincronização: diferença de ${difference} ms`
+      `Livros fora de sincronização: diferença de ${difference} ms`
     );
   }
 
@@ -900,13 +787,10 @@ function validateBookSynchronization(
 
 
 // ==========================================
-// AVALIAR UMA OPORTUNIDADE
+// AVALIAR OPORTUNIDADE
 // ==========================================
 
-async function evaluateCandidate(
-  opportunity,
-  conversionGraph
-) {
+async function evaluateCandidate(opportunity, conversionGraph) {
   const [buyBook, sellBook] = await Promise.all([
     fetchOrderBookSnapshot(
       opportunity.buyExchangeId,
@@ -919,83 +803,23 @@ async function evaluateCandidate(
     )
   ]);
 
-  validateBookSynchronization(
-    buyBook,
-    sellBook
-  );
+  validateBookSynchronization(buyBook, sellBook);
 
-  const buyExchange = createExchange(
-    opportunity.buyExchangeId
-  );
+  // Usa as taxas obtidas dos mercados carregados
+  // durante a consulta dos livros.
+  opportunity.buyFeePercent = buyBook.feePercent;
+  opportunity.sellFeePercent = sellBook.feePercent;
 
-  const sellExchange = createExchange(
-    opportunity.sellExchangeId
-  );
-
-  let buyMarket;
-  let sellMarket;
-
-  try {
-    // Carrega mercados nas duas corretoras.
-    await Promise.all([
-      buyExchange.loadMarkets(),
-      sellExchange.loadMarkets()
-    ]);
-
-    buyMarket =
-      buyExchange.markets[opportunity.symbol];
-
-    sellMarket =
-      sellExchange.markets[opportunity.symbol];
-
-    if (!buyMarket || !sellMarket) {
-      throw new Error(
-        'Não foi possível carregar os dados dos mercados para calcular as taxas.'
-      );
-    }
-
-  } finally {
-    for (const exchange of [
-      buyExchange,
-      sellExchange
-    ]) {
-      if (
-        exchange &&
-        typeof exchange.close === 'function'
-      ) {
-        try {
-          await exchange.close();
-        } catch (error) {
-          // Ignora falha ao fechar conexão.
-        }
-      }
-    }
-  }
-
-  // Taxas atualizadas.
-  opportunity.buyFeePercent = getMarketFee(
-    opportunity.buyExchangeId,
-    buyMarket
-  );
-
-  opportunity.sellFeePercent = getMarketFee(
-    opportunity.sellExchangeId,
-    sellMarket
-  );
-
-  // Conversão da moeda de cotação para BRL.
   const quoteToBRL = findConversionRate(
     conversionGraph,
     opportunity.quote,
     'BRL'
   );
 
-  // Conversão do orçamento USD.
-  const budgetConversion =
-    findBudgetConversionRate(
-      conversionGraph,
-      opportunity.quote
-    );
+  const budgetConversion = findBudgetConversionRate(
+    conversionGraph,
+    opportunity.quote
+  );
 
   if (
     !quoteToBRL ||
@@ -1004,75 +828,59 @@ async function evaluateCandidate(
     !budgetConversion
   ) {
     throw new Error(
-      `Conversão indisponível: ${opportunity.quote} para BRL ou USD para ${opportunity.quote}.`
+      `Conversão indisponível: ${opportunity.quote} para BRL ou USD para ${opportunity.quote}`
     );
   }
 
   opportunity.conversion = {
     quoteToBRL,
-
     usdToQuote: budgetConversion.rate,
-
-    budgetConversionEstimated:
-      budgetConversion.estimated
+    budgetConversionEstimated: budgetConversion.estimated
   };
 
-  // ======================================
-  // SIMULAR TODOS OS ORÇAMENTOS
-  // ======================================
+  // ========================================
+  // SIMULAÇÃO DOS ORÇAMENTOS
+  // ========================================
 
-  opportunity.simulations = BUDGETS.map(
-    budgetUSD => {
-      const budgetQuote =
-        Number(budgetUSD) *
-        budgetConversion.rate;
+  opportunity.simulations = BUDGETS.map(budgetUSD => {
+    const budgetQuote =
+      Number(budgetUSD) * budgetConversion.rate;
 
-      const result = simulateBudget({
-        budgetQuote,
-        budgetUSD,
+    const result = simulateBudget({
+      budgetQuote,
+      budgetUSD,
 
-        buyOrderBook: buyBook,
-        sellOrderBook: sellBook,
+      buyOrderBook: buyBook,
+      sellOrderBook: sellBook,
 
-        buyFeePercent:
-          opportunity.buyFeePercent,
+      buyFeePercent: opportunity.buyFeePercent,
+      sellFeePercent: opportunity.sellFeePercent,
 
-        sellFeePercent:
-          opportunity.sellFeePercent,
+      quoteToBRL
+    });
 
-        quoteToBRL
-      });
+    return {
+      ...result,
 
-      return {
-        ...result,
+      budgetUSD,
+      tradeBudgetUSD: budgetUSD,
 
-        budgetUSD,
-        tradeBudgetUSD: budgetUSD,
+      quoteCurrency: opportunity.quote,
 
-        quoteCurrency: opportunity.quote,
-
-        budgetConversionEstimated:
-          budgetConversion.estimated
-      };
-    }
-  );
-
-  // ======================================
-  // RESULTADO DA VALIDAÇÃO
-  // ======================================
+      budgetConversionEstimated:
+        budgetConversion.estimated
+    };
+  });
 
   const validated = opportunity.simulations.filter(
-    simulation =>
-      simulation.validated === true
+    simulation => simulation.validated === true
   );
 
-  opportunity.validatedBudgets =
-    validated.map(
-      simulation => simulation.budgetUSD
-    );
+  opportunity.validatedBudgets = validated.map(
+    simulation => simulation.budgetUSD
+  );
 
-  opportunity.validatedCount =
-    validated.length;
+  opportunity.validatedCount = validated.length;
 
   opportunity.bookTimestamp = Math.min(
     buyBook.timestamp,
@@ -1083,19 +891,12 @@ async function evaluateCandidate(
     buyBook.timestampEstimated ||
     sellBook.timestampEstimated;
 
-  opportunity.bookSynchronizationMs =
-    Math.abs(
-      buyBook.fetchedAt - sellBook.fetchedAt
-    );
+  opportunity.bookSynchronizationMs = Math.abs(
+    buyBook.fetchedAt - sellBook.fetchedAt
+  );
 
   opportunity.status =
-    validated.length > 0
-      ? 'validated'
-      : 'rejected';
-
-  // ======================================
-  // RESULTADO DO ORÇAMENTO PADRÃO
-  // ======================================
+    validated.length > 0 ? 'validated' : 'rejected';
 
   const defaultBudget = Number(
     SIMULATION.DEFAULT_TRADE_BUDGET_USD || 100
@@ -1103,8 +904,7 @@ async function evaluateCandidate(
 
   const defaultSimulation =
     opportunity.simulations.find(
-      item =>
-        Number(item.budgetUSD) === defaultBudget
+      item => Number(item.budgetUSD) === defaultBudget
     ) || opportunity.simulations[0];
 
   if (defaultSimulation) {
@@ -1123,60 +923,52 @@ async function evaluateCandidate(
 
 
 // ==========================================
-// CICLO PRINCIPAL DO SCANNER
+// CICLO PRINCIPAL
 // ==========================================
 
 async function scanMarket() {
   const startedAt = Date.now();
 
-  const enabledExchanges =
-    getEnabledExchanges();
+  const enabledExchanges = getEnabledExchanges();
 
   console.log(
     '[SCANNER] Corretoras habilitadas:',
     enabledExchanges.join(', ')
   );
 
-  // ======================================
-  // CONSULTAR TODAS AS CORRETORAS
-  // ======================================
+  // ========================================
+  // CONSULTAR CORRETORAS
+  // ========================================
 
-  const exchangeResults =
-    await mapWithConcurrency(
-      enabledExchanges,
-      config.EXCHANGE_SCAN_CONCURRENCY || 2,
-      async exchangeId => {
-        try {
-          return await fetchExchangePrices(
-            exchangeId
-          );
-        } catch (error) {
-          return {
-            exchangeId,
+  const exchangeResults = await mapWithConcurrency(
+    enabledExchanges,
+    config.EXCHANGE_SCAN_CONCURRENCY || 2,
+    async exchangeId => {
+      try {
+        return await fetchExchangePrices(exchangeId);
+      } catch (error) {
+        return {
+          exchangeId,
 
-            exchange:
-              config.EXCHANGES[exchangeId]?.name ||
-              exchangeId,
+          exchange:
+            config.EXCHANGES?.[exchangeId]?.name || exchangeId,
 
-            status: 'error',
-            connected: false,
+          status: 'error',
+          connected: false,
 
-            markets: 0,
-            availableMarkets: 0,
+          markets: 0,
+          availableMarkets: 0,
 
-            prices: [],
+          prices: [],
 
-            error:
-              error.message || String(error)
-          };
-        }
+          error: error.message || String(error)
+        };
       }
-    );
+    }
+  );
 
   const connected = exchangeResults.filter(
-    result =>
-      result &&
-      result.connected
+    result => result && result.connected
   );
 
   const totalMarkets = connected.reduce(
@@ -1201,120 +993,102 @@ async function scanMarket() {
     prices.length
   );
 
-  // ======================================
-  // MONTAR GRAFO DE CONVERSÃO
-  // ======================================
+  // ========================================
+  // CONVERSÕES
+  // ========================================
 
-  const conversionGraph =
-    buildConversionGraph(prices);
+  const conversionGraph = buildConversionGraph(prices);
 
-  // ======================================
-  // IDENTIFICAR OPORTUNIDADES
-  // ======================================
+  // ========================================
+  // CANDIDATOS
+  // ========================================
 
-  const candidates =
-    calculateOpportunities(connected);
+  const candidates = calculateOpportunities(connected);
 
   console.log(
     '[SCANNER] Oportunidades preliminares:',
     candidates.length
   );
 
-  const selectedCandidates =
-    candidates.slice(0, MAX_CANDIDATES);
+  const selectedCandidates = candidates.slice(
+    0,
+    MAX_CANDIDATES
+  );
 
-  // ======================================
-  // VALIDAR COM LIVROS DE OFERTAS
-  // ======================================
+  // ========================================
+  // VALIDAR COM LIVROS
+  // ========================================
 
-  const validationResults =
-    await mapWithConcurrency(
-      selectedCandidates,
-      SIMULATION.VALIDATION_CONCURRENCY || 2,
-      async candidate => {
-        try {
-          return await evaluateCandidate(
-            candidate,
-            conversionGraph
-          );
-        } catch (error) {
-          console.error(
-            '[SCANNER] Candidato rejeitado:',
-            candidate.symbol,
-            candidate.buyExchangeId,
-            '->',
-            candidate.sellExchangeId,
-            error.message
-          );
+  const validationResults = await mapWithConcurrency(
+    selectedCandidates,
+    SIMULATION.VALIDATION_CONCURRENCY || 2,
+    async candidate => {
+      try {
+        return await evaluateCandidate(
+          candidate,
+          conversionGraph
+        );
+      } catch (error) {
+        console.error(
+          '[SCANNER] Candidato rejeitado:',
+          candidate.symbol,
+          candidate.buyExchangeId,
+          '->',
+          candidate.sellExchangeId,
+          error.message
+        );
 
-          return {
-            ...candidate,
+        return {
+          ...candidate,
 
-            status: 'rejected',
+          status: 'rejected',
 
-            error:
-              error.message || String(error),
+          error: error.message || String(error),
 
-            simulations: [],
-
-            validatedBudgets: [],
-
-            validatedCount: 0
-          };
-        }
+          simulations: [],
+          validatedBudgets: [],
+          validatedCount: 0
+        };
       }
-    );
+    }
+  );
 
-  // ======================================
-  // SEPARAR APROVADAS E REJEITADAS
-  // ======================================
+  // ========================================
+  // RESULTADOS
+  // ========================================
 
-  const validatedOpportunities =
-    validationResults.filter(
-      item =>
-        item &&
-        item.status === 'validated' &&
-        item.validatedCount > 0
-    );
+  const validatedOpportunities = validationResults.filter(
+    item =>
+      item &&
+      item.status === 'validated' &&
+      item.validatedCount > 0
+  );
 
-  const rejectedCandidates =
-    validationResults.filter(
-      item =>
-        item &&
-        item.status === 'rejected'
-    );
-
-  // ======================================
-  // ORDENAR PELO MAIOR LUCRO VALIDADO
-  // ======================================
+  const rejectedCandidates = validationResults.filter(
+    item => item && item.status === 'rejected'
+  );
 
   validatedOpportunities.sort((a, b) => {
-    const aProfits = a.simulations
-      .filter(item => item.validated)
-      .map(item =>
-        Number(item.netProfitBRL) || 0
-      );
+    const aBest = Math.max(
+      0,
+      ...a.simulations
+        .filter(item => item.validated)
+        .map(item => Number(item.netProfitBRL) || 0)
+    );
 
-    const bProfits = b.simulations
-      .filter(item => item.validated)
-      .map(item =>
-        Number(item.netProfitBRL) || 0
-      );
-
-    const aBest = aProfits.length
-      ? Math.max(...aProfits)
-      : 0;
-
-    const bBest = bProfits.length
-      ? Math.max(...bProfits)
-      : 0;
+    const bBest = Math.max(
+      0,
+      ...b.simulations
+        .filter(item => item.validated)
+        .map(item => Number(item.netProfitBRL) || 0)
+    );
 
     return bBest - aBest;
   });
 
-  // ======================================
-  // RESULTADO FINAL
-  // ======================================
+  // ========================================
+  // RESPOSTA
+  // ========================================
 
   const finishedAt = Date.now();
 
@@ -1343,86 +1117,56 @@ async function scanMarket() {
 
     totalCandidates: candidates.length,
 
-    candidatesValidated:
-      validationResults.length,
+    candidatesValidated: validationResults.length,
 
-    rejectedCount:
-      rejectedCandidates.length,
+    rejectedCount: rejectedCandidates.length,
 
-    validatedCount:
-      validatedOpportunities.length,
+    validatedCount: validatedOpportunities.length,
 
-    opportunities:
-      validatedOpportunities,
+    opportunities: validatedOpportunities,
 
-    // ==================================
-    // CANDIDATOS REJEITADOS
-    // ==================================
+    rejectedCandidates: rejectedCandidates.map(item => ({
+      symbol: item.symbol,
 
-    rejectedCandidates:
-      rejectedCandidates.map(item => ({
-        symbol: item.symbol,
+      buyExchange: item.buyExchange,
+      sellExchange: item.sellExchange,
 
-        buyExchange: item.buyExchange,
-        sellExchange: item.sellExchange,
+      buyExchangeId: item.buyExchangeId,
+      sellExchangeId: item.sellExchangeId,
 
-        buyExchangeId: item.buyExchangeId,
-        sellExchangeId: item.sellExchangeId,
+      grossSpreadPercent: item.grossSpreadPercent,
+      estimatedNetPercent: item.estimatedNetPercent,
 
-        grossSpreadPercent:
-          item.grossSpreadPercent,
+      error: item.error || null,
 
-        estimatedNetPercent:
-          item.estimatedNetPercent,
-
-        error: item.error || null,
-
-        simulations:
-          item.simulations || []
-      })),
-
-    // ==================================
-    // DIAGNÓSTICO
-    // ==================================
+      simulations: item.simulations || []
+    })),
 
     diagnostics: {
-      enabledExchanges:
-        enabledExchanges.length,
+      enabledExchanges: enabledExchanges.length,
+      connectedExchanges: connected.length,
 
-      connectedExchanges:
-        connected.length,
+      marketsAnalyzed: totalMarkets,
+      tickersReceived: prices.length,
 
-      marketsAnalyzed:
-        totalMarkets,
+      candidatesFound: candidates.length,
+      candidatesChecked: validationResults.length,
 
-      tickersReceived:
-        prices.length,
-
-      candidatesFound:
-        candidates.length,
-
-      candidatesChecked:
-        validationResults.length,
-
-      candidatesRejected:
-        rejectedCandidates.length,
-
-      opportunitiesApproved:
-        validatedOpportunities.length,
+      candidatesRejected: rejectedCandidates.length,
+      opportunitiesApproved: validatedOpportunities.length,
 
       budgets: BUDGETS,
 
-      quoteCurrencies:
-        QUOTE_CURRENCIES,
+      quoteCurrencies: QUOTE_CURRENCIES,
 
-      minimumEstimatedProfitPercent:
-        MIN_PROFIT,
+      minimumEstimatedProfitPercent: MIN_PROFIT,
+      maximumSpreadPercent: MAX_SPREAD,
 
-      maximumSpreadPercent:
-        MAX_SPREAD,
+      preliminaryFilter:
+        'Spread líquido estimado positivo. A aprovação depende da simulação completa.',
 
       note:
-        'A aprovação final considera livro de ofertas, liquidez, taxas, slippage e lucro líquido. A paridade USD/stablecoin pode ser estimada quando não há cotação direta.'
+        'A aprovação final considera livro de ofertas, liquidez, taxas, slippage e lucro líquido. A paridade USD/stablecoin pode ser estimada quando não existe cotação direta.'
     }
   };
 
