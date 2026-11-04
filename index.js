@@ -4,7 +4,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const crypto = require('crypto');
 
 const config = require('./config');
 
@@ -23,1610 +22,822 @@ const {
   getEnabledExchanges
 } = require('./exchanges');
 
+// ==========================================
+// CRYPTO ARBITRAGE SCANNER 6.2.2
+// SPOT — SIMULAÇÃO USD / BRL
+// SEM ENVIO DE ORDENS REAIS
+// ==========================================
+
 const app = express();
 
-// ==========================================
-// CONFIGURAÇÃO
-// ==========================================
+const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-app.use(cors());
-app.use(express.json({ limit: '100kb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-
-const PORT = config.PORT || 3000;
-
-const LIVE_TRADING_ENABLED = false;
-const REAL_ORDERS_ENABLED = false;
-
-const SCAN_INTERVAL = Math.max(
-  1000,
-  Number(config.SCAN_INTERVAL) || 5000
-);
-
-const EXCHANGE_CONCURRENCY = Math.max(
-  1,
-  Number(config.EXCHANGE_SCAN_CONCURRENCY) || 2
-);
+const VERSION = '6.2.2';
 
 const ALLOWED_CURRENCIES = ['USD', 'BRL'];
 
-const ALLOWED_BUDGET_VALUES = [50, 100, 150, 250, 500];
+const ALLOWED_BUDGETS = [50, 100, 150, 250, 500];
 
-const SIM_CONFIG = config.SIMULATION || {};
+const SIM = config.SIMULATION || {};
 
-function getAllowedBudgets(currency) {
-  const configured = currency === 'BRL'
-    ? SIM_CONFIG.TRADE_BUDGETS_BRL
-    : SIM_CONFIG.TRADE_BUDGETS_USD;
+const BUDGETS = {
+  USD: normalizeBudgets(SIM.TRADE_BUDGETS_USD),
+  BRL: normalizeBudgets(SIM.TRADE_BUDGETS_BRL)
+};
 
-  const values = Array.isArray(configured)
-    ? configured
-    : ALLOWED_BUDGET_VALUES;
+const HISTORY_LIMIT = 100;
 
-  return ALLOWED_BUDGET_VALUES.filter(value =>
-    values.some(item => Number(item) === value)
-  );
-}
-
-// ==========================================
-// ESTADO DO SISTEMA
-// ==========================================
-
-let lastScan = null;
-
-let scanning = false;
-let scannerRunning = true;
-let diagnosticRunning = false;
+let scannerRunning = false;
 let simulationRunning = false;
+let scheduledScan = null;
 
-let currentScanPromise = null;
-let lastScanError = null;
-
-let scanStartedAt = null;
-let scanCompletedAt = null;
-
-let nextScanTimer = null;
-
-// ==========================================
-// HISTÓRICO DE SIMULAÇÕES
-// ==========================================
+let lastScanResult = null;
+let lastScanAt = null;
 
 const simulationHistory = [];
 
-const MAX_SIMULATION_HISTORY = 100;
-
 // ==========================================
-// FUNÇÕES AUXILIARES
+// CONFIGURAÇÃO EXPRESS
 // ==========================================
 
-function exchangeName(id) {
-  return config.EXCHANGES?.[id]?.name || id;
-}
+app.use(cors());
 
-function safeNumber(value, fallback = null) {
-  const result = Number(value);
+app.use(express.json({ limit: '1mb' }));
 
-  return Number.isFinite(result)
-    ? result
+app.use(express.urlencoded({ extended: true }));
+
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ==========================================
+// UTILITÁRIOS
+// ==========================================
+
+function number(value, fallback = 0) {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed)
+    ? parsed
     : fallback;
 }
 
-function saveSimulation(operation) {
-  simulationHistory.unshift(operation);
+function normalizeBudgets(values) {
+  const source = Array.isArray(values)
+    ? values
+    : ALLOWED_BUDGETS;
 
-  if (simulationHistory.length > MAX_SIMULATION_HISTORY) {
-    simulationHistory.length = MAX_SIMULATION_HISTORY;
-  }
-
-  return operation;
+  return [...new Set(
+    source
+      .map(Number)
+      .filter(value => ALLOWED_BUDGETS.includes(value))
+  )].sort((a, b) => a - b);
 }
 
-function findOpportunity(
-  symbol,
-  buyExchangeId,
-  sellExchangeId
-) {
-  if (!lastScan || !Array.isArray(lastScan.opportunities)) {
-    return null;
+function normalizeExchangeId(item) {
+  if (typeof item === 'string') {
+    return item;
   }
 
-  return lastScan.opportunities.find(item =>
+  return item?.id ||
+    item?.exchangeId ||
+    item?.name ||
+    null;
+}
+
+function getEnabledExchangeIds() {
+  return (getEnabledExchanges() || [])
+    .map(normalizeExchangeId)
+    .filter(Boolean);
+}
+
+function findOpportunity(symbol, buyExchangeId, sellExchangeId) {
+  const opportunities = lastScanResult?.opportunities || [];
+
+  return opportunities.find(item =>
     item.symbol === symbol &&
     item.buyExchangeId === buyExchangeId &&
     item.sellExchangeId === sellExchangeId
-  ) || null;
-}
-
-function getFailedChecks(checks = {}) {
-  const descriptions = {
-    sufficientFill:
-      'Liquidez insuficiente para preencher o capital escolhido.',
-
-    acceptableSlippage:
-      'Slippage acima do limite permitido.',
-
-    positiveProfit:
-      'Lucro líquido negativo ou igual a zero.',
-
-    minimumProfit:
-      'Lucro líquido abaixo do mínimo configurado.',
-
-    fullBuy:
-      'Não foi possível preencher toda a quantidade na compra.',
-
-    fullSell:
-      'Não foi possível preencher toda a quantidade na venda.',
-
-    minimumOrderLimitsValid:
-      'Valor ou quantidade abaixo do mínimo permitido pela corretora.'
-  };
-
-  return Object.entries(checks)
-    .filter(([, passed]) => passed === false)
-    .map(([key]) => ({
-      code: key,
-      description: descriptions[key] || key
-    }));
-}
-
-function createRejectedOperation(data, reason, diagnostics = {}) {
-  const currency = ALLOWED_CURRENCIES.includes(data.budgetCurrency)
-    ? data.budgetCurrency
-    : 'USD';
-
-  const amount = safeNumber(data.budgetAmount);
-
-  const operation = {
-    id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-
-    status: 'REJECTED',
-    mode: 'SPOT',
-    realOrderSent: false,
-
-    symbol: data.symbol || null,
-
-    buyExchangeId: data.buyExchangeId || null,
-    sellExchangeId: data.sellExchangeId || null,
-
-    buyExchange: data.buyExchangeId
-      ? exchangeName(data.buyExchangeId)
-      : null,
-
-    sellExchange: data.sellExchangeId
-      ? exchangeName(data.sellExchangeId)
-      : null,
-
-    budgetCurrency: currency,
-    budgetAmount: amount,
-
-    budgetUSD: currency === 'USD' ? amount : null,
-    budgetBRL: currency === 'BRL' ? amount : null,
-
-    approved: false,
-    reason,
-
-    failedChecks: diagnostics.failedChecks || [],
-    checks: diagnostics.checks || null,
-
-    netProfitBRL: diagnostics.netProfitBRL ?? null,
-    netProfitUSD: diagnostics.netProfitUSD ?? null,
-
-    simulation: diagnostics.simulation || null
-  };
-
-  return saveSimulation(operation);
-}
-
-function findTicker(prices, exchangeId, symbol) {
-  return prices.find(item =>
-    item &&
-    item.exchangeId === exchangeId &&
-    item.symbol === symbol
-  ) || null;
-}
-
-function getTickerFee(ticker, fallback) {
-  const fee = safeNumber(
-    ticker?.feePercent,
-    safeNumber(ticker?.takerFeePercent, fallback)
   );
-
-  return fee;
 }
 
-async function closeExchangeInstances(exchangeInstances) {
-  if (!(exchangeInstances instanceof Map)) return;
+function getFreshPrice(collections, exchangeId, symbol) {
+  for (const collection of collections || []) {
+    if (collection.exchangeId !== exchangeId) continue;
 
-  const entries = Array.from(exchangeInstances.entries());
+    const item = (collection.prices || []).find(
+      price => price.symbol === symbol
+    );
 
-  await Promise.all(
-    entries.map(async ([exchangeId, exchange]) => {
-      if (!exchange) return;
+    if (item) return item;
+  }
 
+  return null;
+}
+
+function saveSimulation(record) {
+  simulationHistory.unshift(record);
+
+  if (simulationHistory.length > HISTORY_LIMIT) {
+    simulationHistory.length = HISTORY_LIMIT;
+  }
+
+  return record;
+}
+
+function sendError(res, status, message, details = null) {
+  return res.status(status).json({
+    success: false,
+    error: message,
+    details
+  });
+}
+
+async function closeExchangeInstances(instances) {
+  const exchanges = [...instances.values()];
+
+  await mapWithConcurrency(
+    exchanges,
+    3,
+    async exchange => {
       try {
         await closeExchange(exchange);
       } catch (error) {
-        console.error(
-          '[EXCHANGE] Erro ao fechar',
-          exchangeId,
-          error.message
-        );
+        // O fechamento não deve ocultar o resultado da simulação.
       }
-    })
+    }
   );
 
-  exchangeInstances.clear();
+  instances.clear();
 }
 
 // ==========================================
-// EXECUÇÃO CONTROLADA DO SCANNER
+// ESTADO DO SERVIDOR
+// ==========================================
+
+function getServerStatus() {
+  return {
+    success: true,
+    status: 'ok',
+    servidor: 'Crypto Arbitrage Scanner',
+    version: VERSION,
+    market: 'spot',
+
+    scannerRunning,
+    simulationRunning,
+
+    operacoesReais: false,
+    simulationOnly: true,
+
+    lastScanAt,
+
+    currencies: ALLOWED_CURRENCIES,
+
+    budgets: {
+      USD: BUDGETS.USD,
+      BRL: BUDGETS.BRL
+    }
+  };
+}
+
+// ==========================================
+// EXECUÇÃO DO SCANNER
 // ==========================================
 
 async function executeScan() {
-  if (scanning && currentScanPromise) {
-    return currentScanPromise;
+  if (scannerRunning || simulationRunning) {
+    return {
+      success: false,
+      busy: true,
+      message: 'Já existe uma operação de consulta em andamento.'
+    };
   }
 
-  if (diagnosticRunning || simulationRunning) {
-    throw new Error(
-      'Outra operação do sistema está em andamento.'
-    );
+  scannerRunning = true;
+
+  try {
+    const result = await scanMarket();
+
+    lastScanResult = result;
+    lastScanAt = new Date().toISOString();
+
+    return result;
+  } catch (error) {
+    console.error('[SCANNER]', error);
+
+    return {
+      success: false,
+      error: error.message || 'Falha ao executar scanner.',
+      timestamp: Date.now()
+    };
+  } finally {
+    scannerRunning = false;
   }
-
-  scanning = true;
-  scanStartedAt = Date.now();
-  lastScanError = null;
-
-  currentScanPromise = (async () => {
-    try {
-      console.log('[SCANNER] Iniciando análise Spot...');
-
-      const result = await scanMarket();
-
-      if (!result || typeof result !== 'object') {
-        throw new Error(
-          'O scanner retornou uma resposta inválida.'
-        );
-      }
-
-      lastScan = result;
-      scanCompletedAt = Date.now();
-
-      console.log(
-        '[SCANNER] Análise concluída:',
-        result.marketsAnalyzed ?? 0,
-        'mercados;',
-        result.validatedCount ?? 0,
-        'oportunidades aprovadas.'
-      );
-
-      return result;
-
-    } catch (error) {
-      lastScanError = error.message || String(error);
-
-      console.error('[SCANNER] Erro:', lastScanError);
-
-      throw error;
-
-    } finally {
-      scanning = false;
-      currentScanPromise = null;
-    }
-  })();
-
-  return currentScanPromise;
 }
 
 // ==========================================
 // AGENDAMENTO AUTOMÁTICO
 // ==========================================
 
-function scheduleNextScan() {
-  if (!scannerRunning) return;
-
-  if (nextScanTimer) {
-    clearTimeout(nextScanTimer);
+function stopScheduledScan() {
+  if (scheduledScan) {
+    clearInterval(scheduledScan);
+    scheduledScan = null;
   }
-
-  nextScanTimer = setTimeout(async () => {
-    nextScanTimer = null;
-
-    if (!scanning && !diagnosticRunning && !simulationRunning) {
-      try {
-        await executeScan();
-      } catch (error) {
-        console.error(
-          '[SCANNER] Falha no ciclo:',
-          error.message
-        );
-      }
-    }
-
-    scheduleNextScan();
-
-  }, SCAN_INTERVAL);
 }
 
-// ==========================================
-// INICIAR SCANNER
-// ==========================================
+function startScheduledScan() {
+  stopScheduledScan();
 
-async function startScanner() {
-  if (scannerRunning && nextScanTimer) return;
+  const interval = Math.max(
+    3000,
+    number(config.SCAN_INTERVAL, 5000)
+  );
 
-  scannerRunning = true;
+  scheduledScan = setInterval(async () => {
+    if (scannerRunning || simulationRunning) return;
 
-  console.log('[SCANNER] Inicializando scanner automático...');
-
-  if (diagnosticRunning || simulationRunning) {
-    scheduleNextScan();
-    return;
-  }
-
-  try {
     await executeScan();
-  } catch (error) {
-    console.error(
-      '[SCANNER] Primeira consulta falhou:',
-      error.message
-    );
-  }
+  }, interval);
 
-  scheduleNextScan();
+  return interval;
 }
 
 // ==========================================
-// PAUSAR SCANNER
-// ==========================================
-
-function stopScanner() {
-  scannerRunning = false;
-
-  if (nextScanTimer) {
-    clearTimeout(nextScanTimer);
-    nextScanTimer = null;
-  }
-
-  console.log('[SCANNER] Scanner pausado.');
-}
-
-// ==========================================
-// HEALTH CHECK
-// ==========================================
-
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    servidor: 'Crypto Arbitrage Scanner',
-    versao: '6.2.2',
-    mode: 'SPOT',
-
-    scannerRunning,
-    scanning,
-    diagnosticRunning,
-    simulationRunning,
-
-    simulationEnabled: true,
-    realOrdersEnabled: false,
-
-    timestamp: Date.now()
-  });
-});
-
-// ==========================================
-// STATUS GERAL
-// ==========================================
-
-app.get('/api/status', (req, res) => {
-  const now = Date.now();
-
-  res.json({
-    server: 'online',
-
-    scannerRunning,
-    scanning,
-    diagnosticRunning,
-    simulationRunning,
-
-    mode: 'SPOT',
-
-    lastScan: scanCompletedAt,
-    scanStartedAt,
-    scanCompletedAt,
-
-    scanAgeMs: scanCompletedAt
-      ? now - scanCompletedAt
-      : null,
-
-    lastScanError,
-
-    nextInterval: SCAN_INTERVAL,
-
-    opportunities: lastScan
-      ? Number(lastScan.validatedCount || 0)
-      : 0,
-
-    marketsAnalyzed: lastScan
-      ? Number(lastScan.marketsAnalyzed || 0)
-      : 0,
-
-    simulationsRegistered: simulationHistory.length,
-
-    simulationEnabled: true,
-    realOrdersEnabled: false
-  });
-});
-
-// ==========================================
-// OPORTUNIDADES
-// ==========================================
-
-app.get('/api/opportunities', async (req, res) => {
-  try {
-    let result;
-
-    if (scanning && currentScanPromise) {
-      result = await currentScanPromise;
-    } else if (!lastScan) {
-      result = await executeScan();
-    } else {
-      result = lastScan;
-    }
-
-    res.json({
-      ...result,
-
-      scannerRunning,
-      scanning,
-
-      lastUpdated: scanCompletedAt,
-
-      scanAgeMs: scanCompletedAt
-        ? Date.now() - scanCompletedAt
-        : null,
-
-      lastScanError
-    });
-
-  } catch (error) {
-    res.status(503).json({
-      error: 'Falha ao consultar oportunidades',
-      message: error.message,
-
-      opportunities: [],
-
-      scannerRunning,
-      scanning,
-      lastScanError
-    });
-  }
-});
-
-// ==========================================
-// FORÇAR NOVA ANÁLISE
-// ==========================================
-
-app.post('/api/scanner/scan', async (req, res) => {
-  try {
-    const result = await executeScan();
-
-    res.json({
-      ...result,
-
-      scannerRunning,
-      scanning,
-
-      lastUpdated: scanCompletedAt,
-      lastScanError
-    });
-
-  } catch (error) {
-    res.status(503).json({
-      error: 'Falha ao executar nova análise',
-      message: error.message,
-
-      opportunities: [],
-
-      scannerRunning,
-      scanning,
-      lastScanError
-    });
-  }
-});
-
-// ==========================================
-// MOTOR DE SIMULAÇÃO 6.2.2
-// USD + BRL
+// SIMULAÇÃO MANUAL
 // ==========================================
 
 async function handleSimulation(req, res) {
+  if (scannerRunning || simulationRunning) {
+    return sendError(
+      res,
+      409,
+      'Scanner ocupado. Aguarde a consulta atual terminar.'
+    );
+  }
+
   const body = req.body || {};
 
-  const {
-    symbol,
-    buyExchangeId,
-    sellExchangeId
-  } = body;
+  const symbol = String(body.symbol || '').trim();
+
+  const buyExchangeId = String(
+    body.buyExchangeId ||
+    body.buyExchange ||
+    ''
+  ).trim().toLowerCase();
+
+  const sellExchangeId = String(
+    body.sellExchangeId ||
+    body.sellExchange ||
+    ''
+  ).trim().toLowerCase();
 
   const budgetCurrency = String(
-    body.budgetCurrency || 'USD'
-  ).toUpperCase();
+    body.budgetCurrency ||
+    body.currency ||
+    'USD'
+  ).trim().toUpperCase();
 
-  const budgetAmount = safeNumber(
-    body.budgetAmount ?? body.budgetUSD
+  const budgetAmount = number(
+    body.budgetAmount ??
+    body.budget ??
+    body.budgetUSD,
+    NaN
   );
 
-  const requestData = {
-    symbol,
-    buyExchangeId,
-    sellExchangeId,
-    budgetCurrency,
-    budgetAmount,
+  if (!symbol || !buyExchangeId || !sellExchangeId) {
+    return sendError(
+      res,
+      400,
+      'Informe moeda, corretora de compra e corretora de venda.'
+    );
+  }
 
-    budgetUSD: budgetCurrency === 'USD'
-      ? budgetAmount
-      : null
-  };
+  if (buyExchangeId === sellExchangeId) {
+    return sendError(
+      res,
+      400,
+      'Compra e venda precisam ocorrer em corretoras diferentes.'
+    );
+  }
 
-  let exchangeInstances = new Map();
+  if (!ALLOWED_CURRENCIES.includes(budgetCurrency)) {
+    return sendError(
+      res,
+      400,
+      'Moeda de orçamento inválida. Use USD ou BRL.'
+    );
+  }
 
-  // ========================================
-  // PROTEÇÃO CONTRA CONCORRÊNCIA
-  // ========================================
+  if (!BUDGETS[budgetCurrency].includes(budgetAmount)) {
+    return sendError(
+      res,
+      400,
+      'Valor de orçamento inválido.',
+      {
+        currency: budgetCurrency,
+        allowedValues: BUDGETS[budgetCurrency]
+      }
+    );
+  }
 
-  if (simulationRunning || diagnosticRunning || scanning) {
-    return res.status(409).json({
-      success: false,
-      error: 'Sistema ocupado',
-      message:
-        'Aguarde o scanner, diagnóstico ou outra simulação terminar.',
-      realOrderSent: false
-    });
+  const enabledIds = getEnabledExchangeIds();
+
+  if (
+    !enabledIds.includes(buyExchangeId) ||
+    !enabledIds.includes(sellExchangeId)
+  ) {
+    return sendError(
+      res,
+      400,
+      'Uma ou ambas as corretoras não estão habilitadas.'
+    );
   }
 
   simulationRunning = true;
 
+  const exchangeInstances = new Map();
+
   try {
-    // ======================================
-    // PROTEÇÃO CONTRA ORDENS REAIS
-    // ======================================
+    // Cria instâncias compartilhadas para consultar
+    // preços e livros de ofertas atualizados.
 
-    if (
-      LIVE_TRADING_ENABLED ||
-      REAL_ORDERS_ENABLED ||
-      config.MODES?.LIVE_TRADING === true
-    ) {
-      return res.status(403).json({
-        success: false,
-        error: 'Modo de operação não permitido',
-        realOrdersEnabled: false,
-        realOrderSent: false
-      });
-    }
-
-    // ======================================
-    // VALIDAR MODO SPOT
-    // ======================================
-
-    if (
-      config.MODES?.SPOT === false ||
-      config.MODES?.SIMULATION === false
-    ) {
-      return res.status(403).json({
-        success: false,
-        error: 'Simulação Spot indisponível',
-        realOrdersEnabled: false
-      });
-    }
-
-    // ======================================
-    // VALIDAR REQUISIÇÃO
-    // ======================================
-
-    if (
-      typeof symbol !== 'string' ||
-      !symbol.trim() ||
-      typeof buyExchangeId !== 'string' ||
-      typeof sellExchangeId !== 'string' ||
-      !ALLOWED_CURRENCIES.includes(budgetCurrency) ||
-      !Number.isFinite(budgetAmount)
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: 'Dados incompletos',
-        message:
-          'Informe moeda, corretoras, par e capital válido.'
-      });
-    }
-
-    if (buyExchangeId === sellExchangeId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Corretoras iguais',
-        message:
-          'Compra e venda devem ocorrer em corretoras diferentes.'
-      });
-    }
-
-    const allowedBudgets = getAllowedBudgets(budgetCurrency);
-
-    if (!allowedBudgets.includes(budgetAmount)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Capital não permitido',
-        budgetCurrency,
-        allowedBudgets
-      });
-    }
-
-    // ======================================
-    // VALIDAR CORRETORAS
-    // ======================================
-
-    const enabled = getEnabledExchanges();
-
-    if (
-      !enabled.includes(buyExchangeId) ||
-      !enabled.includes(sellExchangeId)
-    ) {
-      return res.status(403).json({
-        success: false,
-        error: 'Corretora indisponível',
-        message:
-          'Uma das corretoras não está habilitada.'
-      });
-    }
-
-    // ======================================
-    // VALIDAR ANÁLISE DISPONÍVEL
-    // ======================================
-
-    if (!lastScan || !Array.isArray(lastScan.opportunities)) {
-      return res.status(409).json({
-        success: false,
-        error: 'Nenhuma análise disponível',
-        message:
-          'Aguarde o scanner encontrar oportunidades.'
-      });
-    }
-
-    const opportunity = findOpportunity(
-      symbol,
-      buyExchangeId,
-      sellExchangeId
-    );
-
-    if (!opportunity) {
-      return res.status(404).json({
-        success: false,
-        error: 'Oportunidade não encontrada',
-        message:
-          'Atualize o scanner e tente novamente.'
-      });
-    }
-
-    // ======================================
-    // VERIFICAR IDADE DA ANÁLISE
-    // ======================================
-
-    const scanTimestamp = Number(lastScan.timestamp);
-
-    const scanAge = Date.now() - scanTimestamp;
-
-    if (
-      !Number.isFinite(scanTimestamp) ||
-      scanTimestamp <= 0 ||
-      scanAge < 0 ||
-      scanAge > 60000
-    ) {
-      return res.status(409).json({
-        success: false,
-        error: 'Análise desatualizada',
-        message:
-          'Atualize as oportunidades antes de simular.'
-      });
-    }
-
-    console.log(
-      '[SIMULAÇÃO] Iniciando:',
-      symbol,
-      buyExchangeId,
-      '->',
-      sellExchangeId,
-      '| Capital:',
-      budgetAmount,
-      budgetCurrency
-    );
-
-    // ======================================
-    // CRIAR INSTÂNCIAS COMPARTILHADAS
-    // ======================================
-
-    const enabledExchanges = getEnabledExchanges();
-
-    const instanceResults = await mapWithConcurrency(
-      enabledExchanges,
-      EXCHANGE_CONCURRENCY,
+    const creationResults = await mapWithConcurrency(
+      enabledIds,
+      number(config.EXCHANGE_SCAN_CONCURRENCY, 2),
       async exchangeId => {
-        try {
-          const exchange = await createExchange(exchangeId);
+        const exchange = await createExchange(exchangeId);
 
-          if (!exchange) {
-            throw new Error('Instância não criada.');
-          }
-
-          exchangeInstances.set(exchangeId, exchange);
-
-          return {
-            exchangeId,
-            connected: true
-          };
-
-        } catch (error) {
-          console.error(
-            '[SIMULAÇÃO] Falha ao criar instância:',
-            exchangeId,
-            error.message
+        if (!exchange) {
+          throw new Error(
+            'Não foi possível conectar à ' + exchangeId
           );
-
-          return {
-            exchangeId,
-            connected: false,
-            error: error.message || String(error)
-          };
         }
+
+        exchangeInstances.set(exchangeId, exchange);
+
+        return exchangeId;
       }
     );
 
-    // ======================================
-    // BUSCAR PREÇOS COM AS MESMAS INSTÂNCIAS
-    // ======================================
+    const connectedIds = creationResults.filter(
+      item => typeof item === 'string'
+    );
 
-    const freshExchangeResults = await mapWithConcurrency(
-      Array.from(exchangeInstances.entries()),
-      EXCHANGE_CONCURRENCY,
-      async ([exchangeId, exchange]) => {
-        try {
-          const result = await fetchExchangePrices(
-            exchangeId,
-            exchange
-          );
+    if (
+      !connectedIds.includes(buyExchangeId) ||
+      !connectedIds.includes(sellExchangeId)
+    ) {
+      throw new Error(
+        'Não foi possível conectar às duas corretoras selecionadas.'
+      );
+    }
 
-          return {
-            exchangeId,
-            connected: true,
-            markets: result.markets || 0,
-            prices: result.prices || []
-          };
+    // Consulta os preços atuais das corretoras conectadas.
 
-        } catch (error) {
-          console.error(
-            '[SIMULAÇÃO] Falha ao atualizar:',
-            exchangeId,
-            error.message
-          );
+    const priceResults = await mapWithConcurrency(
+      connectedIds,
+      number(config.EXCHANGE_SCAN_CONCURRENCY, 2),
+      async exchangeId => {
+        const exchange = exchangeInstances.get(exchangeId);
 
-          return {
-            exchangeId,
-            connected: false,
-            prices: [],
-            error: error.message || String(error)
-          };
-        }
+        return fetchExchangePrices(exchangeId, exchange);
       }
     );
 
-    const freshPrices = freshExchangeResults.flatMap(
-      result => result?.prices || []
+    const priceCollections = priceResults.filter(
+      item => item && !item.error
     );
 
-    // ======================================
-    // VERIFICAR OS DOIS MERCADOS
-    // ======================================
-
-    const buyTicker = findTicker(
-      freshPrices,
+    const buyPrice = getFreshPrice(
+      priceCollections,
       buyExchangeId,
       symbol
     );
 
-    const sellTicker = findTicker(
-      freshPrices,
+    const sellPrice = getFreshPrice(
+      priceCollections,
       sellExchangeId,
       symbol
     );
 
-    if (
-      !buyTicker ||
-      !sellTicker ||
-      !Number.isFinite(Number(buyTicker.ask)) ||
-      !Number.isFinite(Number(sellTicker.bid)) ||
-      Number(buyTicker.ask) <= 0 ||
-      Number(sellTicker.bid) <= 0
-    ) {
-      const operation = createRejectedOperation(
-        requestData,
-        'Par Spot indisponível ou sem preços válidos em uma das corretoras.',
-        {
-          failedChecks: [{
-            code: 'MARKET_UNAVAILABLE',
-            description:
-              'Não foi possível obter ask e bid atualizados nos dois mercados.'
-          }]
-        }
+    if (!buyPrice || !sellPrice) {
+      throw new Error(
+        'Não foi possível obter cotações atuais para ' + symbol +
+        ' nas duas corretoras.'
       );
-
-      return res.status(422).json({
-        success: false,
-        error: 'Mercado indisponível',
-        operation,
-        realOrderSent: false
-      });
     }
 
-    // ======================================
-    // GRAFO DE CONVERSÃO ATUALIZADO
-    // ======================================
+    if (buyPrice.ask <= 0 || sellPrice.bid <= 0) {
+      throw new Error('Cotação inválida recebida das corretoras.');
+    }
 
-    const freshConversionGraph =
-      buildConversionGraph(freshPrices);
+    // Atualiza o grafo de conversão com os preços recentes.
 
-    console.log(
-      '[SIMULAÇÃO] Mercados atualizados:',
-      freshPrices.length
+    const conversionGraph = buildConversionGraph(
+      priceCollections
     );
 
-    console.log(
-      '[SIMULAÇÃO] Corretoras conectadas:',
-      freshExchangeResults.filter(
-        result => result && result.connected
-      ).length
-    );
-
-    // ======================================
-    // ATUALIZAR PREÇOS DA OPORTUNIDADE
-    // ======================================
-
-    const fallbackFee = safeNumber(
-      config.ARBITRAGE?.TRADING_FEE_PERCENT,
-      0.10
-    );
+    // Reconstrói a oportunidade com os preços atuais.
 
     const freshOpportunity = {
-      ...opportunity,
+      symbol,
 
-      buyPrice: Number(buyTicker.ask),
-      sellPrice: Number(sellTicker.bid),
+      base: buyPrice.base,
+      quote: buyPrice.quote,
 
-      buyFeePercent: getTickerFee(
-        buyTicker,
-        opportunity.buyFeePercent ?? fallbackFee
-      ),
+      buyExchangeId,
+      sellExchangeId,
 
-      sellFeePercent: getTickerFee(
-        sellTicker,
-        opportunity.sellFeePercent ?? fallbackFee
-      ),
+      buyExchange: buyExchangeId,
+      sellExchange: sellExchangeId,
+
+      buyPrice: buyPrice.ask,
+      sellPrice: sellPrice.bid,
+
+      buyFeePercent: number(buyPrice.feePercent),
+      sellFeePercent: number(sellPrice.feePercent),
+
+      status: 'candidate',
 
       simulations: [],
-      conversion: null,
-
       validatedBudgets: [],
       validatedBudgetsUSD: [],
-      validatedBudgetsBRL: [],
-
-      validatedCount: 0,
-      validatedCountUSD: 0,
-      validatedCountBRL: 0
+      validatedBudgetsBRL: []
     };
 
-    // ======================================
-    // REAVALIAR COM LIVROS ATUAIS
-    // ======================================
+    if (buyPrice.quote !== sellPrice.quote) {
+      throw new Error(
+        'As duas corretoras estão usando moedas de cotação diferentes.'
+      );
+    }
+
+    // A validação busca livros de ofertas novos e calcula
+    // taxas, slippage, liquidez e lucro líquido.
 
     const evaluated = await evaluateCandidate(
       freshOpportunity,
-      freshConversionGraph,
+      conversionGraph,
       exchangeInstances
     );
 
-    if (!evaluated) {
-      const operation = createRejectedOperation(
-        requestData,
-        'Não foi possível reavaliar a oportunidade com os dados atualizados.',
-        {
-          failedChecks: [{
-            code: 'REEVALUATION_FAILED',
-            description:
-              'A avaliação atualizada não retornou resultado.'
-          }]
-        }
-      );
-
-      return res.status(422).json({
-        success: false,
-        error: 'Falha na reavaliação',
-        operation,
-        realOrderSent: false
-      });
-    }
-
-    // ======================================
-    // LOCALIZAR SIMULAÇÃO DO CAPITAL
-    // ======================================
-
-    const simulations = Array.isArray(evaluated.simulations)
-      ? evaluated.simulations
-      : [];
-
-    const simulation = simulations.find(item =>
-      String(item.budgetCurrency || 'USD').toUpperCase() ===
+    const selectedSimulation = (
+      evaluated.simulations || []
+    ).find(item =>
+      String(item.budgetCurrency || '').toUpperCase() ===
         budgetCurrency &&
       Math.abs(
-        Number(item.budgetAmount ?? item.budgetUSD) -
-        budgetAmount
+        number(item.budgetAmount, -1) - budgetAmount
       ) < 0.001
     );
 
-    if (!simulation) {
-      const operation = createRejectedOperation(
-        requestData,
-        evaluated.reason ||
-          'Não foi possível calcular a simulação para o capital escolhido.',
-        {
-          failedChecks: [{
-            code: 'SIMULATION_UNAVAILABLE',
-            description:
-              `O motor não retornou resultado para ${budgetAmount} ${budgetCurrency}.`
-          }]
-        }
+    if (!selectedSimulation) {
+      throw new Error(
+        'A simulação para esse orçamento não foi gerada.'
       );
-
-      return res.status(422).json({
-        success: false,
-        error: 'Simulação indisponível',
-        operation,
-        realOrderSent: false
-      });
     }
 
-    // ======================================
-    // RESULTADO E CRITÉRIOS
-    // ======================================
+    const approved =
+      selectedSimulation.validated === true ||
+      selectedSimulation.approved === true;
 
-    const approved = simulation.validated === true;
+    const record = {
+      id: Date.now().toString(36) +
+        Math.random().toString(36).slice(2, 8),
 
-    const failedChecks = getFailedChecks(
-      simulation.checks
-    );
+      timestamp: new Date().toISOString(),
 
-    const reason = approved
-      ? 'Simulação aprovada'
-      : (
-          simulation.reason ||
-          failedChecks
-            .map(item => item.description)
-            .join(' ') ||
-          'Operação não passou nos critérios de aprovação.'
-        );
-
-    // ======================================
-    // COMPATIBILIDADE DE CAMPOS
-    // ======================================
-
-    const netProfitQuote =
-      simulation.netProfitQuote ??
-      simulation.netProfit ??
-      null;
-
-    const buyFee =
-      simulation.buyFee ??
-      simulation.buyFeeAmount ??
-      null;
-
-    const sellFee =
-      simulation.sellFee ??
-      simulation.sellFeeAmount ??
-      null;
-
-    const totalBuyCost =
-      simulation.totalBuyCost ??
-      simulation.usedBudget ??
-      null;
-
-    const totalSellRevenue =
-      simulation.totalSellRevenue ??
-      simulation.sellRevenue ??
-      null;
-
-    const investedBRL =
-      simulation.investedBRL ??
-      simulation.totalBuyCostBRL ??
-      null;
-
-    const netProfitBRL =
-      simulation.netProfitBRL ?? null;
-
-    const netProfitUSD =
-      simulation.netProfitUSD ?? null;
-
-    // ======================================
-    // REGISTRAR OPERAÇÃO
-    // ======================================
-
-    const operation = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-
-      status: approved ? 'SIMULATED' : 'REJECTED',
-
-      mode: 'SPOT',
-      realOrderSent: false,
-      approved,
-
-      symbol: evaluated.symbol || symbol,
-
-      base: evaluated.base || null,
-      quote: evaluated.quote || null,
-
-      buyExchange:
-        evaluated.buyExchange ||
-        exchangeName(buyExchangeId),
-
-      sellExchange:
-        evaluated.sellExchange ||
-        exchangeName(sellExchangeId),
+      symbol,
 
       buyExchangeId,
       sellExchangeId,
 
-      buyPrice:
-        simulation.buyPrice ??
-        simulation.buyVWAP ??
-        null,
-
-      sellPrice:
-        simulation.sellPrice ??
-        simulation.sellVWAP ??
-        null,
-
-      bestBuyPrice:
-        simulation.bestBuyPrice ??
-        simulation.bestAsk ??
-        null,
-
-      bestSellPrice:
-        simulation.bestSellPrice ??
-        simulation.bestBid ??
-        null,
-
-      buyFeePercent:
-        simulation.buyFeePercent ??
-        evaluated.buyFeePercent ??
-        null,
-
-      sellFeePercent:
-        simulation.sellFeePercent ??
-        evaluated.sellFeePercent ??
-        null,
-
       budgetCurrency,
       budgetAmount,
 
-      budgetUSD:
-        simulation.budgetUSD ??
-        (budgetCurrency === 'USD' ? budgetAmount : null),
+      buyPrice: evaluated.buyPrice,
+      sellPrice: evaluated.sellPrice,
 
-      budgetBRL:
-        simulation.budgetBRL ??
-        (budgetCurrency === 'BRL' ? budgetAmount : null),
+      grossSpreadPercent: evaluated.grossSpreadPercent,
+      estimatedNetPercent: evaluated.estimatedNetPercent,
 
-      budgetUSDEquivalent:
-        simulation.budgetUSDEquivalent ?? null,
+      simulation: selectedSimulation,
 
-      budgetBRLEquivalent:
-        simulation.budgetBRLEquivalent ?? null,
+      validated: approved,
+      approved,
 
-      quoteCurrency: evaluated.quote || null,
-
-      quantity: simulation.quantity ?? 0,
-
-      investedBRL,
-
-      netProfitBRL,
-      netProfitUSD,
-
-      netProfitQuote,
-
-      profitPercent:
-        simulation.profitPercent ?? null,
-
-      fillRatio:
-        simulation.fillRatio ?? null,
-
-      slippagePercent:
-        simulation.slippagePercent ?? null,
-
-      buySlippagePercent:
-        simulation.buySlippagePercent ?? null,
-
-      sellSlippagePercent:
-        simulation.sellSlippagePercent ?? null,
-
-      buyFee,
-      sellFee,
-
-      totalBuyCost,
-      totalSellRevenue,
-
-      reason,
-      failedChecks,
-
-      checks: simulation.checks || null,
-
-      simulation: {
-        ...simulation,
-
-        budgetCurrency,
-        budgetAmount,
-
-        netProfitQuote,
-        netProfitBRL,
-        netProfitUSD,
-
-        buyFee,
-        sellFee,
-
-        totalBuyCost,
-        totalSellRevenue,
-
-        investedBRL,
-
-        reason,
-        failedChecks
-      },
-
-      conversion: evaluated.conversion || null,
-
-      bookTimestamp:
-        evaluated.bookTimestamp ?? null,
-
-      bookTimestampEstimated:
-        evaluated.bookTimestampEstimated ?? null,
-
-      scanTimestamp: lastScan.timestamp,
-
-      freshMarketCheck: true,
-
-      conversionExchangesChecked:
-        freshExchangeResults
-          .filter(result => result && result.connected)
-          .map(result => result.exchangeId)
+      realOrderSent: false,
+      simulationOnly: true
     };
 
-    saveSimulation(operation);
+    saveSimulation(record);
 
-    // ======================================
-    // LOG DO RESULTADO
-    // ======================================
-
-    console.log(
-      approved
-        ? '[SIMULAÇÃO] APROVADA:'
-        : '[SIMULAÇÃO] REJEITADA:',
-
-      symbol,
-      '|',
-      exchangeName(buyExchangeId),
-      '->',
-      exchangeName(sellExchangeId),
-
-      '| Capital:',
-      budgetAmount,
-      budgetCurrency,
-
-      '| Lucro:',
-      netProfitBRL,
-      'BRL /',
-      netProfitUSD,
-      'USD',
-
-      '| Motivo:',
-      reason
-    );
-
-    // ======================================
-    // RESPOSTA
-    // ======================================
-
-    return res.status(approved ? 201 : 422).json({
-      success: approved,
+    return res.json({
+      success: true,
+      version: VERSION,
 
       message: approved
-        ? 'Compra e venda simuladas com sucesso.'
-        : 'A simulação foi rejeitada pelos critérios de validação.',
+        ? 'Simulação validada com os livros de ofertas atuais.'
+        : 'Simulação calculada, mas não aprovada pelos critérios de segurança.',
 
-      operation,
-
-      diagnostics: {
-        approved,
-        failedChecks,
-
-        checks: simulation.checks || null,
-
-        reason,
-
-        budgetCurrency,
-        budgetAmount,
-
-        conversion: evaluated.conversion || null,
-
-        conversionExchangesChecked:
-          operation.conversionExchangesChecked
-      },
+      validated: approved,
+      approved,
 
       realOrderSent: false,
-      realOrdersEnabled: false
-    });
 
+      opportunity: evaluated,
+
+      simulation: selectedSimulation,
+
+      budgetCurrency,
+      budgetAmount,
+
+      netProfit: selectedSimulation.netProfit ?? null,
+      netProfitUSD: selectedSimulation.netProfitUSD ?? null,
+      netProfitBRL: selectedSimulation.netProfitBRL ?? null,
+
+      profitPercent: selectedSimulation.profitPercent ?? null,
+
+      historyId: record.id
+    });
   } catch (error) {
-    console.error('[SIMULAÇÃO]', error);
+    console.error('[SIMULATION]', error);
 
-    let operation = null;
-
-    if (
-      requestData.symbol &&
-      requestData.buyExchangeId &&
-      requestData.sellExchangeId
-    ) {
-      operation = createRejectedOperation(
-        requestData,
-        error.message || 'Falha ao atualizar o mercado.',
-        {
-          failedChecks: [{
-            code: 'SIMULATION_ERROR',
-            description:
-              error.message || 'Erro interno de simulação.'
-          }]
-        }
-      );
-    }
-
-    return res.status(502).json({
-      success: false,
-
-      error: 'Falha ao executar simulação',
-
-      message: error.message,
-
-      operation,
-
-      realOrderSent: false,
-      realOrdersEnabled: false
-    });
-
+    return sendError(
+      res,
+      422,
+      error.message || 'Não foi possível concluir a simulação.'
+    );
   } finally {
     await closeExchangeInstances(exchangeInstances);
-    simulationRunning = false;
 
-    if (scannerRunning && !nextScanTimer) {
-      scheduleNextScan();
-    }
+    simulationRunning = false;
   }
 }
+
+// ==========================================
+// ROTAS DE SAÚDE
+// ==========================================
+
+app.get('/health', (req, res) => {
+  res.json(getServerStatus());
+});
+
+app.get('/api/health', (req, res) => {
+  res.json(getServerStatus());
+});
+
+// ==========================================
+// ROTAS DE STATUS E CONFIGURAÇÃO
+// ==========================================
+
+app.get('/api/status', (req, res) => {
+  res.json({
+    ...getServerStatus(),
+    opportunities:
+      lastScanResult?.opportunities?.length || 0
+  });
+});
+
+app.get('/api/config', (req, res) => {
+  res.json({
+    success: true,
+    version: VERSION,
+
+    market: 'spot',
+
+    currencies: ALLOWED_CURRENCIES,
+
+    budgets: {
+      USD: BUDGETS.USD,
+      BRL: BUDGETS.BRL
+    },
+
+    simulationOnly: true,
+    realTradingEnabled: false,
+
+    simulation: {
+      maxSlippagePercent: SIM.MAX_SLIPPAGE_PERCENT,
+      minBudgetFillRatio: SIM.MIN_BUDGET_FILL_RATIO,
+      minNetProfitBRL: SIM.MIN_NET_PROFIT_BRL,
+      orderBookMaxAgeMs: SIM.ORDERBOOK_MAX_AGE_MS
+    }
+  });
+});
+
+// ==========================================
+// ROTAS DE CORRETORAS
+// ==========================================
+
+app.get('/api/exchanges', (req, res) => {
+  const supported = getSupportedExchanges() || [];
+  const enabled = getEnabledExchangeIds();
+
+  const exchanges = supported.map(item => {
+    const id = normalizeExchangeId(item);
+
+    return {
+      id,
+      name: item?.name || id,
+      enabled: enabled.includes(id),
+      market: 'spot'
+    };
+  });
+
+  res.json({
+    success: true,
+    exchanges,
+    total: exchanges.length
+  });
+});
+
+// ==========================================
+// ROTAS DO SCANNER
+// ==========================================
+
+app.get('/api/scan', async (req, res) => {
+  const market = String(
+    req.query.market || 'spot'
+  ).toLowerCase();
+
+  if (market !== 'spot') {
+    return sendError(
+      res,
+      400,
+      'Somente o mercado SPOT está habilitado.'
+    );
+  }
+
+  const result = await executeScan();
+
+  if (!result.success && result.busy) {
+    return res.status(409).json(result);
+  }
+
+  if (!result.success) {
+    return res.status(500).json(result);
+  }
+
+  res.json(result);
+});
+
+app.post('/api/scan', async (req, res) => {
+  const result = await executeScan();
+
+  if (!result.success && result.busy) {
+    return res.status(409).json(result);
+  }
+
+  if (!result.success) {
+    return res.status(500).json(result);
+  }
+
+  res.json(result);
+});
+
+app.get('/api/opportunities', (req, res) => {
+  res.json({
+    success: true,
+    timestamp: lastScanAt,
+    opportunities: lastScanResult?.opportunities || []
+  });
+});
+
+app.get('/api/last-scan', (req, res) => {
+  res.json({
+    success: true,
+    result: lastScanResult,
+    lastScanAt
+  });
+});
 
 // ==========================================
 // ROTAS DE SIMULAÇÃO
 // ==========================================
 
-app.post(
-  ['/api/simulation', '/api/simulations'],
-  handleSimulation
-);
+app.post('/api/simulation', handleSimulation);
+
+// Compatibilidade com versões anteriores do HTML.
+app.post('/api/simulations', handleSimulation);
 
 // ==========================================
 // HISTÓRICO DE SIMULAÇÕES
 // ==========================================
 
-app.get(
-  [
-    '/api/simulations',
-    '/api/simulation/history'
-  ],
-  (req, res) => {
-    res.json({
-      success: true,
-
-      total: simulationHistory.length,
-
-      persistent: false,
-
-      realOrdersEnabled: false,
-
-      simulations: simulationHistory
-    });
-  }
-);
-
-// ==========================================
-// DIAGNÓSTICO DAS CORRETORAS
-// ==========================================
-
-app.get('/api/diagnostico', async (req, res) => {
-  if (diagnosticRunning || scanning || simulationRunning) {
-    return res.status(409).json({
-      status: 'busy',
-      message: 'Aguarde a operação atual terminar.'
-    });
-  }
-
-  diagnosticRunning = true;
-
-  try {
-    const enabledExchanges = getEnabledExchanges();
-
-    const results = await mapWithConcurrency(
-      enabledExchanges,
-      EXCHANGE_CONCURRENCY,
-      async exchangeId => {
-        try {
-          const result = await fetchExchangePrices(exchangeId);
-
-          return {
-            id: exchangeId,
-            name: exchangeName(exchangeId),
-
-            status: 'connected',
-            connected: true,
-
-            markets:
-              Number(result.markets) ||
-              (result.prices || []).length,
-
-            error: null
-          };
-
-        } catch (error) {
-          return {
-            id: exchangeId,
-            name: exchangeName(exchangeId),
-
-            status: 'error',
-            connected: false,
-
-            markets: 0,
-
-            error: error.message || String(error)
-          };
-        }
-      }
-    );
-
-    const connected = results.filter(item => item.connected);
-
-    const totalMarkets = results.reduce(
-      (total, item) => total + Number(item.markets || 0),
-      0
-    );
-
-    res.json({
-      timestamp: Date.now(),
-
-      totalExchanges: results.length,
-
-      exchangesConnected: connected.length,
-
-      exchangesFailed: results.length - connected.length,
-
-      totalMarkets,
-
-      exchanges: results
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      error: error.message
-    });
-
-  } finally {
-    diagnosticRunning = false;
-
-    if (scannerRunning && !nextScanTimer) {
-      scheduleNextScan();
-    }
-  }
+app.get('/api/simulations', (req, res) => {
+  res.json({
+    success: true,
+    simulations: simulationHistory,
+    history: simulationHistory,
+    total: simulationHistory.length
+  });
 });
 
-// ==========================================
-// LISTA DE CORRETORAS
-// ==========================================
-
-app.get('/api/exchanges', (req, res) => {
-  const configuredExchanges = getSupportedExchanges();
-
-  const scanExchanges = lastScan?.exchanges || [];
-
-  const exchanges = configuredExchanges.map(exchange => {
-    const scanInfo = scanExchanges.find(
-      item =>
-        (item.id || item.exchangeId) === exchange.id
-    );
-
-    return {
-      id: exchange.id,
-      name: exchange.name,
-
-      enabled: exchange.enabled,
-      supported: exchange.supported,
-
-      connected: scanInfo
-        ? scanInfo.connected
-        : false,
-
-      status: scanInfo
-        ? scanInfo.status
-        : exchange.status,
-
-      markets: scanInfo
-        ? scanInfo.markets
-        : 0,
-
-      error: scanInfo?.error || null
-    };
+app.get('/api/simulation/history', (req, res) => {
+  res.json({
+    success: true,
+    simulations: simulationHistory,
+    history: simulationHistory,
+    total: simulationHistory.length
   });
+});
+
+app.delete('/api/simulations', (req, res) => {
+  simulationHistory.length = 0;
 
   res.json({
-    total: exchanges.length,
-
-    enabled: exchanges.filter(item => item.enabled).length,
-
-    supported: exchanges.filter(item => item.supported).length,
-
-    connected: exchanges.filter(item => item.connected).length,
-
-    exchanges
+    success: true,
+    message: 'Histórico de simulações limpo.',
+    total: 0
   });
 });
 
 // ==========================================
-// CONFIGURAÇÕES PÚBLICAS
-// ==========================================
-
-app.get('/api/config', (req, res) => {
-  const budgetsUSD = getAllowedBudgets('USD');
-  const budgetsBRL = getAllowedBudgets('BRL');
-
-  res.json({
-    version: '6.2.2',
-
-    scanInterval: SCAN_INTERVAL,
-
-    maximumMarkets: config.MAX_MARKETS_PER_EXCHANGE,
-
-    minimumProfit: config.ARBITRAGE?.MIN_PROFIT_PERCENT,
-
-    currencies: ALLOWED_CURRENCIES,
-
-    budgets: {
-      USD: budgetsUSD,
-      BRL: budgetsBRL
-    },
-
-    defaultBudgets: {
-      USD:
-        SIM_CONFIG.DEFAULT_TRADE_BUDGET_USD ?? 100,
-
-      BRL:
-        SIM_CONFIG.DEFAULT_TRADE_BUDGET_BRL ?? 100
-    },
-
-    modes: {
-      SPOT: true,
-      FUTURES: false,
-      DEX: false,
-      SIMULATION: true,
-      LIVE_TRADING: false
-    },
-
-    realOrdersEnabled: false
-  });
-});
-
-// ==========================================
-// INICIAR SCANNER PELA API
+// CONTROLE DO SCANNER
 // ==========================================
 
 app.post('/api/scanner/start', (req, res) => {
-  if (scannerRunning) {
-    return res.json({
-      success: true,
-      message: 'Scanner já está ativo.'
-    });
-  }
-
-  scannerRunning = true;
+  const interval = startScheduledScan();
 
   res.json({
     success: true,
-    message: 'Scanner iniciado.'
+    running: true,
+    intervalMs: interval
   });
-
-  if (!scanning && !diagnosticRunning && !simulationRunning) {
-    executeScan()
-      .catch(error => {
-        console.error('[SCANNER]', error.message);
-      })
-      .finally(() => {
-        scheduleNextScan();
-      });
-  } else {
-    scheduleNextScan();
-  }
 });
-
-// ==========================================
-// PAUSAR SCANNER PELA API
-// ==========================================
 
 app.post('/api/scanner/stop', (req, res) => {
-  stopScanner();
+  stopScheduledScan();
 
   res.json({
     success: true,
-    message: 'Scanner pausado.'
+    running: false
   });
 });
 
 // ==========================================
-// ÚLTIMO RESULTADO
+// DIAGNÓSTICO
 // ==========================================
 
-app.get('/api/scanner/last', (req, res) => {
+app.get('/api/diagnostics', (req, res) => {
   res.json({
-    timestamp: scanCompletedAt,
+    success: true,
+    version: VERSION,
 
-    scanning,
-    scannerRunning,
-    diagnosticRunning,
-    simulationRunning,
+    server: getServerStatus(),
 
-    lastScanError,
+    exchanges: {
+      enabled: getEnabledExchangeIds(),
+      supported: getSupportedExchanges()
+    },
 
-    data: lastScan
+    scanner: {
+      running: scannerRunning,
+      lastScanAt,
+      opportunities:
+        lastScanResult?.opportunities?.length || 0
+    },
+
+    simulation: {
+      running: simulationRunning,
+      historyCount: simulationHistory.length,
+      currencies: ALLOWED_CURRENCIES,
+      budgets: BUDGETS
+    },
+
+    realOrders: false
   });
 });
 
 // ==========================================
-// ROTA NÃO ENCONTRADA
+// ROTA INEXISTENTE
 // ==========================================
 
 app.use((req, res) => {
   res.status(404).json({
+    success: false,
     error: 'Rota não encontrada',
-    path: req.path
+    path: req.originalUrl,
+    version: VERSION
   });
 });
 
 // ==========================================
-// TRATAMENTO DE ERROS
+// TRATAMENTO GLOBAL DE ERROS
 // ==========================================
 
 app.use((error, req, res, next) => {
-  console.error('[SERVER]', error);
+  console.error('[SERVER ERROR]', error);
 
   if (res.headersSent) {
     return next(error);
   }
 
   res.status(500).json({
-    error: 'Erro interno do servidor',
-
-    message:
-      config.NODE_ENV === 'development'
+    success: false,
+    error: 'Erro interno do servidor.',
+    details:
+      process.env.NODE_ENV === 'development'
         ? error.message
-        : 'Erro interno'
+        : undefined
   });
 });
 
@@ -1634,51 +845,55 @@ app.use((error, req, res, next) => {
 // INICIALIZAÇÃO
 // ==========================================
 
-const server = app.listen(
-  PORT,
-  '0.0.0.0',
-  () => {
-    console.log('====================================');
+const server = app.listen(PORT, () => {
+  console.log('======================================');
+  console.log('CRYPTO ARBITRAGE SCANNER ' + VERSION);
+  console.log('Servidor iniciado na porta ' + PORT);
+  console.log('Mercado: SPOT');
+  console.log('Moedas: USD / BRL');
+  console.log('Orçamentos USD:', BUDGETS.USD.join(', '));
+  console.log('Orçamentos BRL:', BUDGETS.BRL.join(', '));
+  console.log('Ordens reais: DESABILITADAS');
+  console.log('======================================');
 
-    console.log('CRYPTO ARBITRAGE SCANNER');
-    console.log('Versão: 6.2.2');
+  // Primeira consulta após iniciar o servidor.
+  setTimeout(() => {
+    if (!scannerRunning && !simulationRunning) {
+      executeScan();
+    }
+  }, 2000);
 
-    console.log('Porta:', PORT);
-    console.log('Modo: SPOT');
-
-    console.log('Orçamento USD:', getAllowedBudgets('USD'));
-    console.log('Orçamento BRL:', getAllowedBudgets('BRL'));
-
-    console.log('Simulação: ATIVA');
-    console.log('Ordens reais: DESATIVADAS');
-
-    console.log('====================================');
-
-    startScanner();
-  }
-);
+  startScheduledScan();
+});
 
 // ==========================================
-// ENCERRAMENTO CONTROLADO
+// ENCERRAMENTO SEGURO
 // ==========================================
 
 async function shutdown(signal) {
-  console.log(
-    `[SERVER] Recebido ${signal}. Encerrando...`
-  );
+  console.log('[SERVER] Encerrando por', signal);
 
-  stopScanner();
+  stopScheduledScan();
 
   server.close(() => {
-    console.log('[SERVER] Servidor encerrado.');
     process.exit(0);
   });
 
   setTimeout(() => {
-    console.error('[SERVER] Encerramento forçado.');
     process.exit(1);
-  }, 10000).unref();
+  }, 10000);
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// ==========================================
+// EXPORTAÇÃO
+// ==========================================
+
+module.exports = {
+  app,
+  server,
+  executeScan,
+  getServerStatus
+};
