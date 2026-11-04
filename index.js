@@ -6,6 +6,7 @@ const cors = require('cors');
 const path = require('path');
 
 const config = require('./config');
+const { scanDexMarkets, getDexStatus } = require('./dex');
 
 const {
   scanMarket,
@@ -32,7 +33,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.2.6';
+const VERSION = '6.3.0';
 
 const ALLOWED_CURRENCIES = ['USD'];
 
