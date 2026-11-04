@@ -210,8 +210,11 @@ async function fetchExchangePrices(
     );
   }
 
+  let markets = null;
+  let tickers = null;
+
   try {
-    let markets = await loadMarketsSafe(exchange);
+    markets = await loadMarketsSafe(exchange);
 
     if (typeof exchange.fetchTickers !== 'function') {
       throw new Error(
@@ -248,7 +251,7 @@ async function fetchExchangePrices(
       };
     }
 
-    let tickers = await exchange.fetchTickers(symbols);
+    tickers = await exchange.fetchTickers(symbols);
 
     const prices = [];
 
