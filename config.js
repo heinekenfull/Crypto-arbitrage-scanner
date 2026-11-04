@@ -20,6 +20,7 @@ module.exports = {
     htx: { enabled: true, name: 'HTX' },
     bitmart: { enabled: true, name: 'BitMart' },
     bingx: { enabled: true, name: 'BingX' },
+
     binance: { enabled: false, name: 'Binance' },
     bybit: { enabled: false, name: 'Bybit' }
   },
@@ -36,21 +37,8 @@ module.exports = {
     DEFAULT_TRADE_BUDGET_USD: 100,
     DEFAULT_TRADE_BUDGET_BRL: 100,
 
-    TRADE_BUDGETS_USD: [
-      50,
-      100,
-      150,
-      250,
-      500
-    ],
-
-    TRADE_BUDGETS_BRL: [
-      50,
-      100,
-      150,
-      250,
-      500
-    ],
+    TRADE_BUDGETS_USD: [50, 100, 150, 250, 500],
+    TRADE_BUDGETS_BRL: [50, 100, 150, 250, 500],
 
     ORDERBOOK_DEPTH: null,
     ORDERBOOK_MAX_AGE_MS: 15000,
