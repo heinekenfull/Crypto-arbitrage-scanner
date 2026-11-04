@@ -44,7 +44,7 @@ async function fetchNetworkPools(network) {
   const response = await axios.get(url, {
     timeout: 9000,
     headers: {
-      Accept: 'application/json;version=20230302'
+      Accept: 'application/json;version=20230203'
     },
     params: { page: 1 }
   });
