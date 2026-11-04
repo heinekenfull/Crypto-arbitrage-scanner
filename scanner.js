@@ -955,7 +955,7 @@ async function closeExchangeMap(exchangeInstances) {
 // SCANNER PRINCIPAL
 // ==========================================
 
-async function scanMarket() {
+async function scanMarket(onProgress = null) {
   const startedAt = Date.now();
   console.log('[SCAN] Iniciando varredura SPOT.');
 
@@ -1021,6 +1021,60 @@ async function scanMarket() {
       0,
       MAX_CANDIDATES
     );
+
+    // Publica a primeira leitura assim que os tickers chegam.
+    // Esta etapa é preliminar: ainda não confirma liquidez, slippage
+    // nem lucro líquido pelo livro de ofertas.
+    if (typeof onProgress === 'function') {
+      const preliminary = {
+        success: true,
+        market: 'spot',
+        version: '6.0.0',
+        phase: 'validating',
+        isPreliminary: true,
+        timestamp: Date.now(),
+        lastUpdated: Date.now(),
+        exchanges: exchangeResults,
+        exchangesConnected: exchangeResults.filter(
+          item => item.connected
+        ).length,
+        marketsAnalyzed,
+        candidatesFound: candidates.length,
+        candidatesValidated: 0,
+        validatedOpportunities: 0,
+        opportunities: selectedCandidates.map(item => ({
+          ...item,
+          status: 'preliminary',
+          isPreliminary: true,
+          simulations: [],
+          validatedBudgets: [],
+          validatedBudgetsUSD: [],
+          validatedBudgetsBRL: []
+        })),
+        diagnostics: {
+          phase: 'preliminary',
+          enabledExchanges: exchangeIds.length,
+          connectedExchanges: exchangeResults.filter(
+            item => item.connected
+          ).length,
+          candidateCount: candidates.length,
+          candidatesChecked: 0,
+          validationErrors: 0,
+          validationConcurrency: VALIDATION_CONCURRENCY,
+          budgetsUSD: BUDGETS_USD,
+          budgetsBRL: [],
+          simulationsPerOpportunity: BUDGETS_USD.length,
+          rejected: []
+        },
+        durationMs: Date.now() - startedAt
+      };
+
+      try {
+        onProgress(preliminary);
+      } catch (progressError) {
+        console.warn('[SCAN] Não foi possível publicar a prévia:', progressError.message);
+      }
+    }
 
     // Valida por par de corretoras: no máximo duas instâncias CCXT
     // permanecem carregadas ao mesmo tempo. Reutiliza o par para todos
@@ -1127,6 +1181,8 @@ async function scanMarket() {
       success: true,
       market: 'spot',
       version: '6.0.0',
+      phase: 'complete',
+      isPreliminary: false,
 
       timestamp: Date.now(),
       lastUpdated: Date.now(),
