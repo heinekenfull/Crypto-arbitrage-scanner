@@ -23,7 +23,7 @@ const {
 } = require('./exchanges');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.3.0
+// CRYPTO ARBITRAGE SCANNER 6.0.0 MOBILE TEST
 // SPOT — SIMULAÇÃO USD / BRL
 // SEM ENVIO DE ORDENS REAIS
 // ==========================================
@@ -859,7 +859,7 @@ const server = app.listen(PORT, () => {
     if (!scannerRunning && !simulationRunning) {
       executeScan();
     }
-  }, 2000);
+  }, 5000);
 
   startScheduledScan();
 });
