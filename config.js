@@ -51,10 +51,28 @@ module.exports = {
     MIN_NET_PROFIT_BRL: 0.10
   },
 
+  DEX: {
+    ENABLED: true,
+    PROVIDER: 'geckoterminal',
+    CACHE_TTL_MS: 60000,
+    MIN_LIQUIDITY_USD: 10000,
+    MAX_POOLS_PER_NETWORK: 20,
+    NETWORKS: [
+      { id: 'eth', name: 'Ethereum' },
+      { id: 'bsc', name: 'BNB Chain' },
+      { id: 'polygon_pos', name: 'Polygon' },
+      { id: 'arbitrum', name: 'Arbitrum' },
+      { id: 'optimism', name: 'Optimism' },
+      { id: 'base', name: 'Base' },
+      { id: 'avax', name: 'Avalanche' },
+      { id: 'solana', name: 'Solana' }
+    ]
+  },
+
   MODES: {
     SPOT: true,
     FUTURES: false,
-    DEX: false,
+    DEX: true,
     SIMULATION: true,
     LIVE_TRADING: false
   }

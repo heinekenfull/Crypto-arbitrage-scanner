@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crypto Arbitrage Scanner 6.2.6</title>
+<title>Crypto Arbitrage Scanner 6.3.0</title>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -68,11 +68,13 @@ header{padding:15px}
 <body>
 
 <header>
-  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.2.6</div>
+  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.3.0</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
 <div class="container">
+<div class="controls" style="margin-top:0"><button class="primary" id="spotModeButton">MODO SPOT</button><button class="secondary" id="dexModeButton">MODO DEX MULTICHAIN</button></div>
+<div id="spotMode">
 
 <h2>Dashboard de Arbitragem Spot</h2>
 
@@ -204,9 +206,11 @@ header{padding:15px}
 </div>
 
 </div>
+<div class="panel" id="dexPanel" style="display:none"><h2>DEX Multichain</h2><p class="panel-description">Monitoramento informativo de pools em Ethereum, BNB Chain, Polygon, Arbitrum, Optimism, Base, Avalanche e Solana.</p><div class="controls"><div class="control-group"><label for="dexNetworkSelect">Rede</label><select id="dexNetworkSelect"><option value="all">Todas as redes</option><option value="eth">Ethereum</option><option value="bsc">BNB Chain</option><option value="polygon_pos">Polygon</option><option value="arbitrum">Arbitrum</option><option value="optimism">Optimism</option><option value="base">Base</option><option value="avax">Avalanche</option><option value="solana">Solana</option></select></div><button class="primary" id="dexScanButton">ANALISAR DEX</button></div><p class="info-line" id="dexSummary">Aguardando consulta.</p><h3>Diferenças indicativas entre DEXs</h3><div class="table-wrap"><table><thead><tr><th>Rede</th><th>Token</th><th>DEX com menor preço</th><th>DEX com maior preço</th><th>Diferença</th></tr></thead><tbody id="dexSpreadTable"><tr><td colspan="5">Aguardando análise.</td></tr></tbody></table></div><h3 style="margin-top:16px">Pools monitorados</h3><div class="table-wrap"><table><thead><tr><th>Rede</th><th>Token / Pool</th><th>DEX</th><th>Preço USD</th><th>Liquidez USD</th><th>Volume 24h USD</th></tr></thead><tbody id="dexPoolTable"><tr><td colspan="6">Clique em ANALISAR DEX.</td></tr></tbody></table></div><div class="notice">Diferenças de preço são indicativas, não executáveis. Ainda não incluem cotação de swap, gas, impacto de preço ou MEV. Nenhuma ordem real é enviada.</div></div>
+</div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.2.6 · SPOT · USD
+CRYPTO ARBITRAGE SCANNER 6.3.0 · SPOT · USD
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -1193,9 +1197,100 @@ async function loadExchanges() {
   }
 }
 
+
+let dexLastData = null;
+function renderDexPools(data) {
+  dexLastData = data;
+  const selectedNetwork = document.getElementById('dexNetworkSelect').value;
+  const pools = (data.pools || []).filter(pool => selectedNetwork === 'all' || pool.networkId === selectedNetwork);
+  const poolBody = document.getElementById('dexPoolTable');
+  poolBody.replaceChildren();
+  if (!pools.length) {
+    const row = poolBody.insertRow();
+    const cell = row.insertCell();
+    cell.colSpan = 6;
+    cell.textContent = 'Nenhum pool encontrado para este filtro.';
+  } else {
+    pools.slice(0, 100).forEach(pool => {
+      const row = poolBody.insertRow();
+      [
+        pool.network,
+        pool.poolName,
+        pool.dex,
+        Number(pool.baseTokenPriceUsd || 0).toLocaleString('en-US', { maximumFractionDigits: 8 }),
+        Number(pool.liquidityUsd || 0).toLocaleString('en-US', { maximumFractionDigits: 0 }),
+        Number(pool.volume24hUsd || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ].forEach(value => {
+        const cell = row.insertCell();
+        cell.textContent = String(value);
+      });
+    });
+  }
+  const spreadBody = document.getElementById('dexSpreadTable');
+  spreadBody.replaceChildren();
+  const spreads = (data.indicativeSpreads || []).filter(item => selectedNetwork === 'all' || item.networkId === selectedNetwork);
+  if (!spreads.length) {
+    const row = spreadBody.insertRow();
+    const cell = row.insertCell();
+    cell.colSpan = 5;
+    cell.textContent = 'Nenhuma diferença indicativa encontrada.';
+  } else {
+    spreads.slice(0, 50).forEach(item => {
+      const row = spreadBody.insertRow();
+      [
+        item.network,
+        item.token,
+        item.lowerDex,
+        item.higherDex,
+        Number(item.indicativeSpreadPercent || 0).toFixed(3) + '%'
+      ].forEach(value => {
+        const cell = row.insertCell();
+        cell.textContent = String(value);
+      });
+    });
+  }
+  document.getElementById('dexSummary').textContent =
+    'Redes conectadas: ' + data.networksConnected + '/' + data.networksConfigured +
+    ' | Pools: ' + pools.length +
+    ' | Diferenças indicativas: ' + spreads.length +
+    ' | Atualização: ' + new Date(data.timestamp).toLocaleString('pt-BR') +
+    (data.cached ? ' | Cache' : '');
+}
+async function scanDexPools() {
+  const button = document.getElementById('dexScanButton');
+  const summary = document.getElementById('dexSummary');
+  button.disabled = true;
+  summary.textContent = 'Consultando pools das oito redes...';
+  try {
+    const result = await apiRequest('/api/dex/scan');
+    renderDexPools(result);
+  } catch (error) {
+    summary.textContent = 'Erro na consulta DEX: ' + error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // ==========================================
 // EVENTOS
 // ==========================================
+document.getElementById('spotModeButton').addEventListener('click', () => {
+  document.getElementById('spotMode').style.display = '';
+  document.getElementById('dexPanel').style.display = 'none';
+  document.getElementById('spotModeButton').className = 'primary';
+  document.getElementById('dexModeButton').className = 'secondary';
+});
+document.getElementById('dexModeButton').addEventListener('click', () => {
+  document.getElementById('spotMode').style.display = 'none';
+  document.getElementById('dexPanel').style.display = '';
+  document.getElementById('spotModeButton').className = 'secondary';
+  document.getElementById('dexModeButton').className = 'primary';
+});
+document.getElementById('dexScanButton').addEventListener('click', scanDexPools);
+document.getElementById('dexNetworkSelect').addEventListener('change', () => {
+  if (dexLastData) renderDexPools(dexLastData);
+});
+
 
 document.getElementById('budgetSelect').addEventListener('change', () => {
   renderOpportunities();
