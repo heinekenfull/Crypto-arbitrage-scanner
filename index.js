@@ -34,15 +34,14 @@ const PORT = Number(process.env.PORT || config.PORT || 3000);
 
 const VERSION = '6.2.6';
 
-const ALLOWED_CURRENCIES = ['USD', 'BRL'];
+const ALLOWED_CURRENCIES = ['USD'];
 
 const ALLOWED_BUDGETS = [50, 100, 150, 250, 500];
 
 const SIM = config.SIMULATION || {};
 
 const BUDGETS = {
-  USD: normalizeBudgets(SIM.TRADE_BUDGETS_USD),
-  BRL: normalizeBudgets(SIM.TRADE_BUDGETS_BRL)
+  USD: normalizeBudgets(SIM.TRADE_BUDGETS_USD)
 };
 
 const HISTORY_LIMIT = 100;
@@ -193,7 +192,6 @@ function getServerStatus() {
 
     budgets: {
       USD: BUDGETS.USD,
-      BRL: BUDGETS.BRL
     }
   };
 }
@@ -323,7 +321,7 @@ async function handleSimulation(req, res) {
     return sendError(
       res,
       400,
-      'Moeda de orçamento inválida. Use USD ou BRL.'
+      'Moeda de orçamento inválida. Use somente USD.'
     );
   }
 
