@@ -32,7 +32,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.2.2';
+const VERSION = '6.2.3';
 
 const ALLOWED_CURRENCIES = ['USD', 'BRL'];
 
@@ -352,17 +352,21 @@ async function handleSimulation(req, res) {
     );
   }
 
+  // Uma simulação só precisa consultar as duas corretoras
+  // escolhidas. Evita abrir todas as conexões a cada clique.
+  const selectedIds = [...new Set([
+    buyExchangeId,
+    sellExchangeId
+  ])];
+
   simulationRunning = true;
 
   const exchangeInstances = new Map();
 
   try {
-    // Cria instâncias compartilhadas para consultar
-    // preços e livros de ofertas atualizados.
-
     const creationResults = await mapWithConcurrency(
-      enabledIds,
-      number(config.EXCHANGE_SCAN_CONCURRENCY, 2),
+      selectedIds,
+      2,
       async exchangeId => {
         const exchange = await createExchange(exchangeId);
 
@@ -391,11 +395,9 @@ async function handleSimulation(req, res) {
       );
     }
 
-    // Consulta os preços atuais das corretoras conectadas.
-
     const priceResults = await mapWithConcurrency(
       connectedIds,
-      number(config.EXCHANGE_SCAN_CONCURRENCY, 2),
+      2,
       async exchangeId => {
         const exchange = exchangeInstances.get(exchangeId);
 

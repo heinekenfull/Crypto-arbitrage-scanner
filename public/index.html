@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crypto Arbitrage Scanner 6.2</title>
+<title>Crypto Arbitrage Scanner 6.2.3</title>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -68,7 +68,7 @@ header{padding:15px}
 <body>
 
 <header>
-  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.2</div>
+  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.2.3</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
@@ -214,7 +214,7 @@ header{padding:15px}
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.2 · SPOT · USD / BRL
+CRYPTO ARBITRAGE SCANNER 6.2.3 · SPOT · USD / BRL
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -1245,7 +1245,34 @@ async function initialize() {
 
   await loadSimulationHistory();
 
-  // Atualiza apenas o estado do servidor.
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
   setInterval(checkServer, 15000);
 }
 
