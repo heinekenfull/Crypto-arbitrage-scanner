@@ -62,7 +62,6 @@ header{padding:15px}
 .controls>*{width:100%}
 .control-group select{width:100%}
 }
-.mode-active{background:#087c60!important;border-color:#087c60!important}.mode-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
 </style>
 </head>
 
@@ -74,12 +73,8 @@ header{padding:15px}
 </header>
 
 <div class="container">
-<div class="controls" style="margin-top:0">
-  <button class="primary" id="spotModeButton">MODO SPOT</button>
-  <button class="secondary" id="dexModeButton">MODO DEX MULTICHAIN</button>
-</div>
+<div class="controls" style="margin-top:0"><button class="primary" id="spotModeButton">MODO SPOT</button><button class="secondary" id="dexModeButton">MODO DEX MULTICHAIN</button></div>
 <div id="spotMode">
-
 
 <h2>Dashboard de Arbitragem Spot</h2>
 
@@ -215,7 +210,7 @@ header{padding:15px}
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.3.0 · SPOT + DEX MULTICHAIN · USD
+CRYPTO ARBITRAGE SCANNER 6.3.0 · SPOT · USD
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -1204,309 +1199,68 @@ async function loadExchanges() {
 
 
 let dexLastData = null;
-
 function renderDexPools(data) {
   dexLastData = data;
   const selectedNetwork = document.getElementById('dexNetworkSelect').value;
-  const pools = (data.pools || []).filter(pool =>
-    selectedNetwork === 'all' || pool.networkId === selectedNetwork
-  );
-  const body = document.getElementById('dexPoolTable');
-  body.replaceChildren();
-
+  const pools = (data.pools || []).filter(pool => selectedNetwork === 'all' || pool.networkId === selectedNetwork);
+  const poolBody = document.getElementById('dexPoolTable');
+  poolBody.replaceChildren();
   if (!pools.length) {
-    const row = body.insertRow();
+    const row = poolBody.insertRow();
     const cell = row.insertCell();
     cell.colSpan = 6;
     cell.textContent = 'Nenhum pool encontrado para este filtro.';
   } else {
     pools.slice(0, 100).forEach(pool => {
-      const row = body.insertRow();
+      const row = poolBody.insertRow();
       [
         pool.network,
         pool.poolName,
         pool.dex,
-        '
-
-document.getElementById('spotModeButton').addEventListener('click', () => {
-  document.getElementById('spotMode').style.display = '';
-  document.getElementById('dexPanel').style.display = 'none';
-  document.getElementById('spotModeButton').className = 'primary';
-  document.getElementById('dexModeButton').className = 'secondary';
-});
-document.getElementById('dexModeButton').addEventListener('click', () => {
-  document.getElementById('spotMode').style.display = 'none';
-  document.getElementById('dexPanel').style.display = '';
-  document.getElementById('spotModeButton').className = 'secondary';
-  document.getElementById('dexModeButton').className = 'primary';
-});
-document.getElementById('dexScanButton').addEventListener('click', scanDexPools);
-document.getElementById('dexNetworkSelect').addEventListener('change', () => {
-  if (dexLastData) renderDexPools(dexLastData);
-});
-
-document.getElementById('budgetSelect').addEventListener('change', () => {
-  renderOpportunities();
-  renderComparison();
-});
-
-// ==========================================
-// INICIALIZAÇÃO
-// ==========================================
-
-async function initialize() {
-  setMessage('Conectando ao backend...');
-
-  const health = await checkServer();
-
-  await loadExchanges();
-
-  if (health) {
-    setMessage(
-      'Backend conectado. Aguardando análise do mercado.',
-      'success'
-    );
-  } else {
-    setMessage(
-      'Não foi possível conectar ao backend. Verifique o servidor.',
-      'error'
-    );
-  }
-
-  await loadSimulationHistory();
-
-  // O backend inicia a primeira varredura automaticamente.
-  // Busca o último resultado sem disparar consultas duplicadas.
-  async function refreshLastScan() {
-    try {
-      const data = await apiRequest('/api/last-scan');
-      const result = data.result || data.data || null;
-
-      if (!result || result.success !== true) return;
-
-      latestData = result;
-      updateDashboard(latestData);
-      renderOpportunities();
-
-      const timestamp = result.lastUpdated || result.timestamp || Date.now();
-      document.getElementById('lastUpdate').textContent =
-        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
-    } catch (error) {
-      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
-    }
-  }
-
-  if (health) {
-    // Aguarda o primeiro ciclo automático do backend.
-    setTimeout(refreshLastScan, 3500);
-    // Atualiza o painel com o resultado mais recente.
-    setInterval(refreshLastScan, 10000);
-  }
-
-  setInterval(checkServer, 15000);
-}
-
-initialize();
-</script>
-
-</body>
-</html>
- + numberValue(pool.baseTokenPriceUsd).toLocaleString('en-US', { maximumFractionDigits: 8 }),
-        '
-
-document.getElementById('budgetSelect').addEventListener('change', () => {
-  renderOpportunities();
-  renderComparison();
-});
-
-// ==========================================
-// INICIALIZAÇÃO
-// ==========================================
-
-async function initialize() {
-  setMessage('Conectando ao backend...');
-
-  const health = await checkServer();
-
-  await loadExchanges();
-
-  if (health) {
-    setMessage(
-      'Backend conectado. Aguardando análise do mercado.',
-      'success'
-    );
-  } else {
-    setMessage(
-      'Não foi possível conectar ao backend. Verifique o servidor.',
-      'error'
-    );
-  }
-
-  await loadSimulationHistory();
-
-  // O backend inicia a primeira varredura automaticamente.
-  // Busca o último resultado sem disparar consultas duplicadas.
-  async function refreshLastScan() {
-    try {
-      const data = await apiRequest('/api/last-scan');
-      const result = data.result || data.data || null;
-
-      if (!result || result.success !== true) return;
-
-      latestData = result;
-      updateDashboard(latestData);
-      renderOpportunities();
-
-      const timestamp = result.lastUpdated || result.timestamp || Date.now();
-      document.getElementById('lastUpdate').textContent =
-        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
-    } catch (error) {
-      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
-    }
-  }
-
-  if (health) {
-    // Aguarda o primeiro ciclo automático do backend.
-    setTimeout(refreshLastScan, 3500);
-    // Atualiza o painel com o resultado mais recente.
-    setInterval(refreshLastScan, 10000);
-  }
-
-  setInterval(checkServer, 15000);
-}
-
-initialize();
-</script>
-
-</body>
-</html>
- + numberValue(pool.liquidityUsd).toLocaleString('en-US', { maximumFractionDigits: 0 }),
-        '
-
-document.getElementById('budgetSelect').addEventListener('change', () => {
-  renderOpportunities();
-  renderComparison();
-});
-
-// ==========================================
-// INICIALIZAÇÃO
-// ==========================================
-
-async function initialize() {
-  setMessage('Conectando ao backend...');
-
-  const health = await checkServer();
-
-  await loadExchanges();
-
-  if (health) {
-    setMessage(
-      'Backend conectado. Aguardando análise do mercado.',
-      'success'
-    );
-  } else {
-    setMessage(
-      'Não foi possível conectar ao backend. Verifique o servidor.',
-      'error'
-    );
-  }
-
-  await loadSimulationHistory();
-
-  // O backend inicia a primeira varredura automaticamente.
-  // Busca o último resultado sem disparar consultas duplicadas.
-  async function refreshLastScan() {
-    try {
-      const data = await apiRequest('/api/last-scan');
-      const result = data.result || data.data || null;
-
-      if (!result || result.success !== true) return;
-
-      latestData = result;
-      updateDashboard(latestData);
-      renderOpportunities();
-
-      const timestamp = result.lastUpdated || result.timestamp || Date.now();
-      document.getElementById('lastUpdate').textContent =
-        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
-    } catch (error) {
-      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
-    }
-  }
-
-  if (health) {
-    // Aguarda o primeiro ciclo automático do backend.
-    setTimeout(refreshLastScan, 3500);
-    // Atualiza o painel com o resultado mais recente.
-    setInterval(refreshLastScan, 10000);
-  }
-
-  setInterval(checkServer, 15000);
-}
-
-initialize();
-</script>
-
-</body>
-</html>
- + numberValue(pool.volume24hUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+        Number(pool.baseTokenPriceUsd || 0).toLocaleString('en-US', { maximumFractionDigits: 8 }),
+        Number(pool.liquidityUsd || 0).toLocaleString('en-US', { maximumFractionDigits: 0 }),
+        Number(pool.volume24hUsd || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
       ].forEach(value => {
         const cell = row.insertCell();
-        cell.textContent = value;
+        cell.textContent = String(value);
       });
     });
   }
-
   const spreadBody = document.getElementById('dexSpreadTable');
   spreadBody.replaceChildren();
-  const spreadRows = (data.indicativeSpreads || []).filter(item =>
-    selectedNetwork === 'all' || item.networkId === selectedNetwork
-  );
-  if (!spreadRows.length) {
+  const spreads = (data.indicativeSpreads || []).filter(item => selectedNetwork === 'all' || item.networkId === selectedNetwork);
+  if (!spreads.length) {
     const row = spreadBody.insertRow();
     const cell = row.insertCell();
     cell.colSpan = 5;
-    cell.textContent = 'Nenhuma diferença indicativa entre pools encontrada.';
+    cell.textContent = 'Nenhuma diferença indicativa encontrada.';
   } else {
-    spreadRows.slice(0, 50).forEach(item => {
+    spreads.slice(0, 50).forEach(item => {
       const row = spreadBody.insertRow();
       [
         item.network,
         item.token,
         item.lowerDex,
         item.higherDex,
-        numberValue(item.indicativeSpreadPercent).toFixed(3) + '%'
+        Number(item.indicativeSpreadPercent || 0).toFixed(3) + '%'
       ].forEach(value => {
         const cell = row.insertCell();
-        cell.textContent = value;
+        cell.textContent = String(value);
       });
     });
   }
-
-  const spreadCount = (data.indicativeSpreads || []).filter(item =>
-    selectedNetwork === 'all' || item.networkId === selectedNetwork
-  ).length;
-
   document.getElementById('dexSummary').textContent =
     'Redes conectadas: ' + data.networksConnected + '/' + data.networksConfigured +
     ' | Pools: ' + pools.length +
-    ' | Diferenças indicativas entre pools: ' + spreadCount +
+    ' | Diferenças indicativas: ' + spreads.length +
     ' | Atualização: ' + new Date(data.timestamp).toLocaleString('pt-BR') +
     (data.cached ? ' | Cache' : '');
-
-  const failed = (data.networks || []).filter(item => !item.success);
-  if (failed.length) {
-    document.getElementById('dexSummary').textContent +=
-      ' | Falhas: ' + failed.map(item => item.name).join(', ');
-  }
 }
-
 async function scanDexPools() {
   const button = document.getElementById('dexScanButton');
   const summary = document.getElementById('dexSummary');
   button.disabled = true;
-  summary.textContent = 'Consultando dados DEX nas oito redes...';
-
+  summary.textContent = 'Consultando pools das oito redes...';
   try {
     const result = await apiRequest('/api/dex/scan');
     renderDexPools(result);
@@ -1526,16 +1280,13 @@ document.getElementById('spotModeButton').addEventListener('click', () => {
   document.getElementById('spotModeButton').className = 'primary';
   document.getElementById('dexModeButton').className = 'secondary';
 });
-
 document.getElementById('dexModeButton').addEventListener('click', () => {
   document.getElementById('spotMode').style.display = 'none';
   document.getElementById('dexPanel').style.display = '';
   document.getElementById('spotModeButton').className = 'secondary';
   document.getElementById('dexModeButton').className = 'primary';
 });
-
 document.getElementById('dexScanButton').addEventListener('click', scanDexPools);
-
 document.getElementById('dexNetworkSelect').addEventListener('change', () => {
   if (dexLastData) renderDexPools(dexLastData);
 });
