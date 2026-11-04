@@ -6,7 +6,6 @@ const cors = require('cors');
 const path = require('path');
 
 const config = require('./config');
-const { scanDexMarkets, getDexStatus } = require('./dex');
 
 const {
   scanMarket,
@@ -33,7 +32,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.3.0';
+const VERSION = '6.0.0';
 
 const ALLOWED_CURRENCIES = ['USD'];
 
@@ -180,8 +179,7 @@ function getServerStatus() {
     servidor: 'Crypto Arbitrage Scanner',
     version: VERSION,
     market: 'spot',
-    modes: { spot: true, dex: true, futures: false },
-    dex: getDexStatus(),
+    modes: { spot: true, dex: false, futures: false },
 
     scannerRunning,
     simulationRunning,
@@ -606,7 +604,7 @@ app.get('/api/config', (req, res) => {
     version: VERSION,
 
     market: 'spot',
-    modes: { spot: true, dex: true, futures: false },
+    modes: { spot: true, dex: false, futures: false },
     currencies: ALLOWED_CURRENCIES,
 
     budgets: {
@@ -614,7 +612,6 @@ app.get('/api/config', (req, res) => {
     },
 
     simulationOnly: true,
-    dex: getDexStatus(),
     realTradingEnabled: false,
 
     simulation: {
@@ -806,27 +803,8 @@ app.get('/api/diagnostics', (req, res) => {
       budgets: BUDGETS
     },
 
-    dex: getDexStatus(),
     realOrders: false
   });
-});
-
-// ==========================================
-// ROTAS DEX MULTICHAIN
-app.get('/api/dex/status', (req, res) => {
-  res.json({ success: true, version: VERSION, dex: getDexStatus() });
-});
-
-app.get('/api/dex/scan', async (req, res) => {
-  try {
-    const result = await scanDexMarkets();
-    if (result.busy) return res.status(409).json(result);
-    if (!result.success) return res.status(502).json(result);
-    return res.json({ ...result, version: VERSION });
-  } catch (error) {
-    console.error('[DEX]', error);
-    return sendError(res, 502, error.message || 'Falha ao consultar mercados DEX.');
-  }
 });
 
 // ROTA INEXISTENTE
