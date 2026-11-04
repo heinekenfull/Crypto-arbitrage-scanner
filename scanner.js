@@ -29,10 +29,6 @@ const BUDGETS_USD = normalizeBudgets(
   SIM.TRADE_BUDGETS_USD
 );
 
-const BUDGETS_BRL = normalizeBudgets(
-  SIM.TRADE_BUDGETS_BRL
-);
-
 const MIN_PROFIT_PERCENT = Number(
   ARB.MIN_PROFIT_PERCENT ?? 0.30
 );
@@ -877,28 +873,9 @@ async function evaluateCandidate(
     simulations.push(result);
   }
 
-  for (const budget of BUDGETS_BRL) {
-    const result = createBudgetSimulation(
-      freshOpportunity,
-      'BRL',
-      budget,
-      buyOrderBook,
-      sellOrderBook,
-      conversionGraph
-    );
-
-    simulations.push(result);
-  }
-
   const validatedBudgetsUSD = simulations
     .filter(item =>
       item.budgetCurrency === 'USD' &&
-      item.validated === true
-    );
-
-  const validatedBudgetsBRL = simulations
-    .filter(item =>
-      item.budgetCurrency === 'BRL' &&
       item.validated === true
     );
 
@@ -908,8 +885,7 @@ async function evaluateCandidate(
     ...freshOpportunity,
 
     status:
-      validatedBudgetsUSD.length ||
-      validatedBudgetsBRL.length
+      validatedBudgetsUSD.length
         ? 'validated'
         : 'not_validated',
 
@@ -917,10 +893,10 @@ async function evaluateCandidate(
 
     validatedBudgets,
     validatedBudgetsUSD,
-    validatedBudgetsBRL,
+    validatedBudgetsBRL: [],
 
     validatedCountUSD: validatedBudgetsUSD.length,
-    validatedCountBRL: validatedBudgetsBRL.length,
+    validatedCountBRL: 0,
 
     buyOrderBookTimestamp: buyOrderBook.timestamp || null,
     sellOrderBookTimestamp: sellOrderBook.timestamp || null,
@@ -1154,10 +1130,10 @@ async function scanMarket() {
         validationConcurrency: VALIDATION_CONCURRENCY,
 
         budgetsUSD: BUDGETS_USD,
-        budgetsBRL: BUDGETS_BRL,
+        budgetsBRL: [],
 
         simulationsPerOpportunity:
-          BUDGETS_USD.length + BUDGETS_BRL.length,
+          BUDGETS_USD.length,
 
         rejected
       },

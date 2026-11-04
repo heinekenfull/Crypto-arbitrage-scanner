@@ -57,11 +57,11 @@ function normalizeBudget(params = {}) {
 
   const amount = number(
     params.budgetAmount,
-    currency === 'USD' ? legacyUSD : 0
+    legacyUSD
   );
 
-  if (!['USD', 'BRL'].includes(currency)) {
-    throw new Error('Moeda de orçamento inválida.');
+  if (currency !== 'USD') {
+    throw new Error('O orçamento de simulação deve ser informado em USD.');
   }
 
   if (amount <= 0) {
@@ -73,18 +73,10 @@ function normalizeBudget(params = {}) {
   let budgetBRL = null;
   let budgetUSD = null;
 
-  if (currency === 'BRL') {
-    budgetBRL = amount;
+  budgetUSD = amount;
 
-    if (usdToBRL > 0) {
-      budgetUSD = amount / usdToBRL;
-    }
-  } else {
-    budgetUSD = amount;
-
-    if (usdToBRL > 0) {
-      budgetBRL = amount * usdToBRL;
-    }
+  if (usdToBRL > 0) {
+    budgetBRL = amount * usdToBRL;
   }
 
   return {
@@ -504,10 +496,8 @@ function simulateBudget(params = {}) {
 
   if (netProfitBRL !== null && usdToBRL > 0) {
     netProfitUSD = netProfitBRL / usdToBRL;
-  } else if (capital.currency === 'USD') {
+  } else {
     netProfitUSD = netProfit;
-  } else if (capital.currency === 'BRL') {
-    netProfitBRL = netProfit;
   }
 
   const minimumProfitBRL = number(

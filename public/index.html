@@ -102,14 +102,6 @@ header{padding:15px}
 <div class="controls">
 
   <div class="control-group">
-    <label for="currencySelect">Moeda da operação</label>
-    <select id="currencySelect">
-      <option value="USD">Dólar (USD)</option>
-      <option value="BRL">Real (BRL)</option>
-    </select>
-  </div>
-
-  <div class="control-group">
     <label for="budgetSelect">Capital selecionado</label>
     <select id="budgetSelect">
       <option value="50">50</option>
@@ -135,7 +127,7 @@ header{padding:15px}
 <div class="panel">
   <h2>Oportunidades de arbitragem</h2>
   <p class="panel-description" id="budgetDescription">
-    Selecione a moeda e o capital para simular as oportunidades.
+    Selecione o capital em USD para simular as oportunidades.
   </p>
 
   <div class="table-wrap">
@@ -164,7 +156,7 @@ header{padding:15px}
 <div class="panel">
   <h2>Comparação das cinco simulações</h2>
   <p class="panel-description" id="comparisonDescription">
-    Selecione uma oportunidade para comparar os cinco capitais.
+    Selecione uma oportunidade para comparar os cinco capitais em USD.
   </p>
   <div id="comparisonArea" class="muted">
     Nenhuma oportunidade selecionada.
@@ -214,7 +206,7 @@ header{padding:15px}
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.2.6 · SPOT · USD / BRL
+CRYPTO ARBITRAGE SCANNER 6.2.6 · SPOT · USD
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -268,7 +260,7 @@ function firstNumber(...values) {
 }
 
 function getCurrency() {
-  return document.getElementById('currencySelect').value;
+  return 'USD';
 }
 
 function getBudget() {
@@ -1204,16 +1196,6 @@ async function loadExchanges() {
 // ==========================================
 // EVENTOS
 // ==========================================
-
-document.getElementById('currencySelect').addEventListener('change', () => {
-  renderOpportunities();
-  renderComparison();
-
-  setMessage(
-    'Moeda selecionada: ' + getCurrency() +
-    '. Os próximos cálculos utilizarão essa moeda.'
-  );
-});
 
 document.getElementById('budgetSelect').addEventListener('change', () => {
   renderOpportunities();
