@@ -13,7 +13,7 @@ const {
 } = require('./simulation');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.2.4
+// CRYPTO ARBITRAGE SCANNER 6.2.5
 // SPOT — SIMULAÇÃO USD / BRL
 // ==========================================
 
@@ -211,7 +211,7 @@ async function fetchExchangePrices(
   }
 
   try {
-    const markets = await loadMarketsSafe(exchange);
+    let markets = await loadMarketsSafe(exchange);
 
     if (typeof exchange.fetchTickers !== 'function') {
       throw new Error(
@@ -248,7 +248,7 @@ async function fetchExchangePrices(
       };
     }
 
-    const tickers = await exchange.fetchTickers(symbols);
+    let tickers = await exchange.fetchTickers(symbols);
 
     const prices = [];
 
@@ -308,7 +308,15 @@ async function fetchExchangePrices(
     };
   } finally {
     if (!sharedExchange) {
+      // Libera referências grandes do CCXT antes da próxima corretora.
+      tickers = null;
+      markets = null;
+      exchange.markets = {};
+      exchange.markets_by_id = {};
+      exchange.currencies = {};
+      exchange.currencies_by_id = {};
       await closeExchange(exchange);
+      if (typeof global.gc === 'function') global.gc();
     }
   }
 }
@@ -893,6 +901,7 @@ async function closeExchangeMap(exchangeInstances) {
   );
 
   exchangeInstances.clear();
+  if (typeof global.gc === 'function') global.gc();
 }
 
 // ==========================================
@@ -1052,7 +1061,7 @@ async function scanMarket() {
     return {
       success: true,
       market: 'spot',
-      version: '6.2.4',
+      version: '6.2.5',
 
       timestamp: Date.now(),
       lastUpdated: Date.now(),
