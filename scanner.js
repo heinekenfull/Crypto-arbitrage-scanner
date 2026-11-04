@@ -37,9 +37,9 @@ const MAX_SPREAD_PERCENT = Number(
   ARB.MAX_SPREAD_PERCENT ?? 10
 );
 
-const MAX_CANDIDATES = Math.max(
-  1,
-  Number(SIM.MAX_CANDIDATES_TO_VALIDATE ?? 100)
+const MAX_CANDIDATES = Math.min(
+  10,
+  Math.max(1, Number(SIM.MAX_CANDIDATES_TO_VALIDATE ?? 8))
 );
 
 const VALIDATION_CONCURRENCY = Math.max(
@@ -1099,7 +1099,7 @@ async function scanMarket() {
     return {
       success: true,
       market: 'spot',
-      version: '6.2.6',
+      version: '6.0.0',
 
       timestamp: Date.now(),
       lastUpdated: Date.now(),
