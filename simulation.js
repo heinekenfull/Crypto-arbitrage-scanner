@@ -4,11 +4,11 @@ const config = require('./config');
 // ==========================================
 // CRYPTO ARBITRAGE SCANNER 6.2.2
 // MOTOR DE SIMULAÇÃO FINANCEIRA
-// SPOT - SEM ORDENS REAIS
-// ORÇAMENTO USD + BRL
+// SPOT — SEM ORDENS REAIS
 // ==========================================
 
 const SIM = config.SIMULATION || {};
+const ARB = config.ARBITRAGE || {};
 
 const MAX_SLIPPAGE_PERCENT = Math.max(
   0,
@@ -20,809 +20,586 @@ const MIN_FILL_RATIO = Math.min(
   Math.max(0, Number(SIM.MIN_BUDGET_FILL_RATIO ?? 0.90))
 );
 
-const MIN_NET_PROFIT_BRL = Number(
-  SIM.MIN_NET_PROFIT_BRL ?? 0.10
+const MAX_BOOK_AGE_MS = Math.max(
+  1000,
+  Number(SIM.ORDERBOOK_MAX_AGE_MS ?? 15000)
 );
 
+const MIN_NET_PROFIT_BRL = Math.max(
+  0,
+  Number(SIM.MIN_NET_PROFIT_BRL ?? 0.10)
+);
 
 // ==========================================
-// CONVERSÃO NUMÉRICA
+// NORMALIZAÇÃO
 // ==========================================
 
 function number(value, fallback = 0) {
-  const result = Number(value);
-
-  return Number.isFinite(result)
-    ? result
-    : fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function optionalNumber(value) {
-  if (value === null || value === undefined || value === '') {
-    return null;
+function feeRate(value) {
+  const n = Math.max(0, number(value, 0));
+
+  // Taxas recebidas em percentual: 0.10 = 0,10%.
+  return n / 100;
+}
+
+function normalizeBudget(params = {}) {
+  const currency = String(
+    params.budgetCurrency ||
+    params.currency ||
+    'USD'
+  ).toUpperCase();
+
+  const legacyUSD = number(params.budgetUSD, 0);
+
+  const amount = number(
+    params.budgetAmount,
+    currency === 'USD' ? legacyUSD : 0
+  );
+
+  if (!['USD', 'BRL'].includes(currency)) {
+    throw new Error('Moeda de orçamento inválida.');
   }
 
-  const result = Number(value);
-
-  return Number.isFinite(result) ? result : null;
-}
-
-function feeRate(percent) {
-  const value = number(percent, 0);
-
-  if (value < 0 || value >= 100) {
-    throw new Error('Taxa de corretagem inválida.');
+  if (amount <= 0) {
+    throw new Error('Capital de simulação inválido.');
   }
 
-  return value / 100;
+  const usdToBRL = number(params.usdToBRL, 0);
+
+  let budgetBRL = null;
+  let budgetUSD = null;
+
+  if (currency === 'BRL') {
+    budgetBRL = amount;
+
+    if (usdToBRL > 0) {
+      budgetUSD = amount / usdToBRL;
+    }
+  } else {
+    budgetUSD = amount;
+
+    if (usdToBRL > 0) {
+      budgetBRL = amount * usdToBRL;
+    }
+  }
+
+  return {
+    currency,
+    amount,
+    budgetUSD,
+    budgetBRL
+  };
 }
 
-
 // ==========================================
-// NORMALIZAÇÃO DO LIVRO
+// LIVRO DE OFERTAS
 // ==========================================
 
-function normalizeLevels(levels, descending = false) {
+function normalizeLevel(level) {
+  if (Array.isArray(level)) {
+    return {
+      price: number(level[0]),
+      amount: number(level[1])
+    };
+  }
+
+  if (level && typeof level === 'object') {
+    return {
+      price: number(
+        level.price ?? level.rate ?? level[0]
+      ),
+      amount: number(
+        level.amount ?? level.quantity ?? level.size ?? level[1]
+      )
+    };
+  }
+
+  return { price: 0, amount: 0 };
+}
+
+function normalizeLevels(levels) {
   if (!Array.isArray(levels)) return [];
 
   return levels
+    .map(normalizeLevel)
     .filter(level =>
-      Array.isArray(level) &&
-      Number.isFinite(Number(level[0])) &&
-      Number.isFinite(Number(level[1])) &&
-      Number(level[0]) > 0 &&
-      Number(level[1]) > 0
-    )
-    .map(level => [
-      Number(level[0]),
-      Number(level[1])
-    ])
-    .sort((a, b) =>
-      descending
-        ? b[0] - a[0]
-        : a[0] - b[0]
+      level.price > 0 &&
+      level.amount > 0
     );
 }
 
-
-// ==========================================
-// VALIDAR LIVRO DE OFERTAS
-// ==========================================
-
-function validateOrderBook(book) {
-  if (!book || typeof book !== 'object') {
+function validateOrderBook(orderBook, options = {}) {
+  if (!orderBook || typeof orderBook !== 'object') {
     return {
       valid: false,
-      reason: 'Livro de ofertas inexistente.'
+      reason: 'Livro de ofertas ausente.'
     };
   }
 
-  const asks = normalizeLevels(book.asks, false);
-  const bids = normalizeLevels(book.bids, true);
+  const asks = normalizeLevels(orderBook.asks);
+  const bids = normalizeLevels(orderBook.bids);
 
-  if (asks.length === 0) {
+  if (!asks.length || !bids.length) {
     return {
       valid: false,
-      reason: 'Livro de compras sem ofertas de venda.'
+      reason: 'Livro sem ofertas suficientes.'
     };
   }
 
-  if (bids.length === 0) {
+  asks.sort((a, b) => a.price - b.price);
+  bids.sort((a, b) => b.price - a.price);
+
+  const bestAsk = asks[0].price;
+  const bestBid = bids[0].price;
+
+  if (bestAsk <= 0 || bestBid <= 0) {
     return {
       valid: false,
-      reason: 'Livro de vendas sem ofertas de compra.'
+      reason: 'Preço inválido no livro de ofertas.'
     };
   }
-
-  const bestAsk = asks[0][0];
-  const bestBid = bids[0][0];
 
   if (bestBid >= bestAsk) {
     return {
       valid: false,
-      reason:
-        'Livro inconsistente: melhor compra maior ou igual à melhor venda.'
+      reason: 'Livro inconsistente: bid igual ou superior ao ask.'
+    };
+  }
+
+  const timestamp = number(
+    orderBook.timestamp ??
+    orderBook.datetimeTimestamp ??
+    orderBook.info?.timestamp,
+    0
+  );
+
+  const now = Date.now();
+  const maxAge = number(
+    options.maxAgeMs,
+    MAX_BOOK_AGE_MS
+  );
+
+  if (timestamp > 0) {
+    const normalizedTimestamp =
+      timestamp < 1e12 ? timestamp * 1000 : timestamp;
+
+    if (now - normalizedTimestamp > maxAge) {
+      return {
+        valid: false,
+        reason: 'Livro de ofertas desatualizado.'
+      };
+    }
+  }
+
+  const spreadPercent =
+    ((bestAsk - bestBid) / bestAsk) * 100;
+
+  const maxSpread = number(
+    options.maxSpreadPercent,
+    number(ARB.MAX_SPREAD_PERCENT, 10)
+  );
+
+  if (spreadPercent > maxSpread) {
+    return {
+      valid: false,
+      reason: 'Spread do livro acima do limite.'
     };
   }
 
   return {
     valid: true,
+    reason: null,
+    asks,
+    bids,
     bestAsk,
     bestBid,
-    spreadPercent:
-      ((bestAsk - bestBid) / bestAsk) * 100,
-    asks,
-    bids
+    spreadPercent,
+    timestamp: timestamp || null
   };
 }
 
-
 // ==========================================
-// CUSTO DE COMPRA POR QUANTIDADE
+// CONSUMO DE LIQUIDEZ
 // ==========================================
 
-function calculateBuyCost(asks, targetQuantity) {
-  const levels = normalizeLevels(asks, false);
-  const quantity = number(targetQuantity);
+function consumeLevels(levels, requestedQuantity) {
+  let remaining = Math.max(0, number(requestedQuantity));
+  let quantity = 0;
+  let total = 0;
 
-  if (quantity <= 0 || levels.length === 0) {
-    return {
-      filled: 0,
-      remaining: Math.max(0, quantity),
-      cost: 0,
-      quantity: 0,
-      vwap: 0,
-      complete: false
-    };
-  }
-
-  let remaining = quantity;
-  let filled = 0;
-  let cost = 0;
-
-  for (const [price, available] of levels) {
+  for (const level of levels) {
     if (remaining <= 0) break;
 
-    const take = Math.min(remaining, available);
+    const available = Math.max(0, number(level.amount));
+    const price = Math.max(0, number(level.price));
 
-    filled += take;
-    cost += take * price;
-    remaining -= take;
+    if (!available || !price) continue;
+
+    const used = Math.min(remaining, available);
+
+    quantity += used;
+    total += used * price;
+    remaining -= used;
   }
 
   return {
-    filled,
+    quantity,
+    total,
     remaining,
-    cost,
-    quantity: filled,
-    vwap: filled > 0 ? cost / filled : 0,
-    complete: remaining <= 1e-12
+    vwap: quantity > 0 ? total / quantity : 0
   };
 }
 
+function calculateBuyCost(orderBook, quantity, fee = 0) {
+  const asks = normalizeLevels(orderBook?.asks)
+    .sort((a, b) => a.price - b.price);
 
-// ==========================================
-// RECEITA DE VENDA POR QUANTIDADE
-// ==========================================
+  const execution = consumeLevels(asks, quantity);
+  const rate = fee > 1 ? feeRate(fee) : Math.max(0, fee);
 
-function calculateSellRevenue(bids, targetQuantity) {
-  const levels = normalizeLevels(bids, true);
-  const quantity = number(targetQuantity);
-
-  if (quantity <= 0 || levels.length === 0) {
-    return {
-      filled: 0,
-      remaining: Math.max(0, quantity),
-      revenue: 0,
-      quantity: 0,
-      vwap: 0,
-      complete: false
-    };
-  }
-
-  let remaining = quantity;
-  let filled = 0;
-  let revenue = 0;
-
-  for (const [price, available] of levels) {
-    if (remaining <= 0) break;
-
-    const take = Math.min(remaining, available);
-
-    filled += take;
-    revenue += take * price;
-    remaining -= take;
-  }
+  const feeAmount = execution.total * rate;
 
   return {
-    filled,
-    remaining,
-    revenue,
-    quantity: filled,
-    vwap: filled > 0 ? revenue / filled : 0,
-    complete: remaining <= 1e-12
+    quantity: execution.quantity,
+    vwap: execution.vwap,
+    grossCost: execution.total,
+    fee: feeAmount,
+    totalCost: execution.total + feeAmount,
+    remaining: execution.remaining,
+    complete: execution.remaining <= 1e-12
   };
 }
 
+function calculateSellRevenue(orderBook, quantity, fee = 0) {
+  const bids = normalizeLevels(orderBook?.bids)
+    .sort((a, b) => b.price - a.price);
 
-// ==========================================
-// CALCULAR QUANTIDADE MÁXIMA COM ORÇAMENTO
-// ==========================================
+  const execution = consumeLevels(bids, quantity);
+  const rate = fee > 1 ? feeRate(fee) : Math.max(0, fee);
+
+  const feeAmount = execution.total * rate;
+
+  return {
+    quantity: execution.quantity,
+    vwap: execution.vwap,
+    grossRevenue: execution.total,
+    fee: feeAmount,
+    netRevenue: execution.total - feeAmount,
+    remaining: execution.remaining,
+    complete: execution.remaining <= 1e-12
+  };
+}
 
 function calculateAffordableQuantity(
-  asks,
+  orderBook,
   budget,
-  buyFeePercent = 0
+  fee = 0
 ) {
-  const levels = normalizeLevels(asks, false);
-  const availableBudget = number(budget);
+  const asks = normalizeLevels(orderBook?.asks)
+    .sort((a, b) => a.price - b.price);
 
-  if (availableBudget <= 0 || levels.length === 0) {
-    return 0;
-  }
+  const availableBudget = Math.max(0, number(budget));
+  const rate = fee > 1 ? feeRate(fee) : Math.max(0, fee);
 
-  const fee = feeRate(buyFeePercent);
+  if (!availableBudget || !asks.length) return 0;
 
   let remainingBudget = availableBudget;
   let quantity = 0;
 
-  for (const [price, available] of levels) {
-    if (remainingBudget <= 0) break;
+  for (const level of asks) {
+    const unitCost = level.price * (1 + rate);
 
-    const costPerUnit = price * (1 + fee);
-    const affordable = remainingBudget / costPerUnit;
+    if (unitCost <= 0) continue;
 
-    const take = Math.min(available, affordable);
+    const affordable = remainingBudget / unitCost;
+    const used = Math.min(level.amount, affordable);
 
-    if (take <= 0) continue;
+    quantity += used;
+    remainingBudget -= used * unitCost;
 
-    quantity += take;
-    remainingBudget -= take * costPerUnit;
+    if (remainingBudget <= 1e-10) break;
   }
 
   return quantity;
 }
 
-
 // ==========================================
-// LIQUIDEZ DISPONÍVEL
-// ==========================================
-
-function getAvailableQuantity(levels) {
-  return normalizeLevels(levels).reduce(
-    (total, level) => total + level[1],
-    0
-  );
-}
-
-
-// ==========================================
-// NORMALIZAR CAPITAL USD / BRL
-// ==========================================
-
-function normalizeBudget(params = {}) {
-  const currency = String(
-    params.budgetCurrency || 'USD'
-  ).toUpperCase();
-
-  if (!['USD', 'BRL'].includes(currency)) {
-    throw new Error('Moeda de orçamento inválida. Use USD ou BRL.');
-  }
-
-  const legacyUSD = optionalNumber(params.budgetUSD);
-
-  const amount = optionalNumber(params.budgetAmount) ??
-    (currency === 'USD' ? legacyUSD : null);
-
-  if (amount === null || amount <= 0) {
-    throw new Error('Valor do orçamento inválido.');
-  }
-
-  const usdToBRL = optionalNumber(params.usdToBRL);
-
-  let budgetUSD = null;
-  let budgetBRL = null;
-
-  if (currency === 'USD') {
-    budgetUSD = amount;
-
-    if (usdToBRL !== null && usdToBRL > 0) {
-      budgetBRL = amount * usdToBRL;
-    }
-  } else {
-    budgetBRL = amount;
-
-    if (usdToBRL !== null && usdToBRL > 0) {
-      budgetUSD = amount / usdToBRL;
-    }
-  }
-
-  return {
-    budgetCurrency: currency,
-    budgetAmount: amount,
-    budgetUSD,
-    budgetBRL,
-    usdToBRL
-  };
-}
-
-
-// ==========================================
-// SIMULAR OPERAÇÃO
+// SIMULAÇÃO COMPLETA
 // ==========================================
 
 function simulateBudget(params = {}) {
-  const {
-    budgetQuote,
-    budgetUSD,
+  const capital = normalizeBudget(params);
 
-    buyOrderBook,
-    sellOrderBook,
+  const buyBook = params.buyOrderBook ||
+    params.buyBook ||
+    params.orderBookBuy;
 
-    buyFeePercent = 0,
-    sellFeePercent = 0,
+  const sellBook = params.sellOrderBook ||
+    params.sellBook ||
+    params.orderBookSell;
 
-    quoteToBRL,
-
-    buyMarketLimits,
-    sellMarketLimits
-  } = params;
-
-  let capital;
-
-  try {
-    capital = normalizeBudget({
-      ...params,
-      budgetUSD
-    });
-  } catch (error) {
-    return rejectedResult(error.message, params);
-  }
-
-  const budget = number(budgetQuote);
-  const conversion = number(quoteToBRL);
-
-  const buyFee = feeRate(buyFeePercent);
-  const sellFee = feeRate(sellFeePercent);
-
-  // ========================================
-  // VALIDAÇÕES INICIAIS
-  // ========================================
-
-  if (budget <= 0) {
-    return rejectedResult(
-      'Orçamento convertido para a moeda do par inválido.',
-      params
-    );
-  }
-
-  if (conversion <= 0) {
-    return rejectedResult(
-      'Cotação de conversão para BRL inválida.',
-      params
-    );
-  }
-
-  const buyValidation = validateOrderBook(buyOrderBook);
+  const buyValidation = validateOrderBook(buyBook);
+  const sellValidation = validateOrderBook(sellBook);
 
   if (!buyValidation.valid) {
-    return rejectedResult(
-      `Livro de compra inválido: ${buyValidation.reason}`,
-      params
-    );
+    return {
+      validated: false,
+      approved: false,
+      status: 'rejected',
+      reason: 'Compra: ' + buyValidation.reason
+    };
   }
-
-  const sellValidation = validateOrderBook(sellOrderBook);
 
   if (!sellValidation.valid) {
-    return rejectedResult(
-      `Livro de venda inválido: ${sellValidation.reason}`,
-      params
-    );
+    return {
+      validated: false,
+      approved: false,
+      status: 'rejected',
+      reason: 'Venda: ' + sellValidation.reason
+    };
   }
 
-  const asks = buyValidation.asks;
-  const bids = sellValidation.bids;
-
-  const bestAsk = asks[0][0];
-  const bestBid = bids[0][0];
-
-  // ========================================
-  // CALCULAR QUANTIDADE DISPONÍVEL
-  // ========================================
-
-  const affordableQuantity = calculateAffordableQuantity(
-    asks,
-    budget,
-    buyFeePercent
+  const budgetQuote = number(
+    params.budgetQuote,
+    capital.amount
   );
 
-  const sellAvailableQuantity = getAvailableQuantity(bids);
-
-  const targetQuantity = Math.min(
-    affordableQuantity,
-    sellAvailableQuantity
-  );
-
-  if (
-    !Number.isFinite(targetQuantity) ||
-    targetQuantity <= 0
-  ) {
-    return rejectedResult(
-      'Liquidez insuficiente para executar a simulação.',
-      params
-    );
+  if (budgetQuote <= 0) {
+    return {
+      validated: false,
+      approved: false,
+      status: 'rejected',
+      reason: 'Não foi possível converter o capital para a moeda do mercado.'
+    };
   }
 
-  // ========================================
-  // VALIDAR LIMITES MÍNIMOS
-  // ========================================
-
-  const minBuyAmount = number(
-    buyMarketLimits?.amount?.min
+  const buyFeePercent = number(
+    params.buyFeePercent,
+    number(params.feePercent, number(ARB.TRADING_FEE_PERCENT, 0.10))
   );
 
-  const minSellAmount = number(
-    sellMarketLimits?.amount?.min
+  const sellFeePercent = number(
+    params.sellFeePercent,
+    number(params.feePercent, number(ARB.TRADING_FEE_PERCENT, 0.10))
   );
 
-  const minBuyCost = number(
-    buyMarketLimits?.cost?.min
+  const buyRate = feeRate(buyFeePercent);
+  const sellRate = feeRate(sellFeePercent);
+
+  const requestedQuantity = calculateAffordableQuantity(
+    buyBook,
+    budgetQuote,
+    buyRate
   );
 
-  const minSellCost = number(
-    sellMarketLimits?.cost?.min
+  if (requestedQuantity <= 0) {
+    return {
+      validated: false,
+      approved: false,
+      status: 'rejected',
+      reason: 'Capital insuficiente ou liquidez indisponível.'
+    };
+  }
+
+  const buy = calculateBuyCost(
+    buyBook,
+    requestedQuantity,
+    buyRate
   );
 
-  if (
-    minBuyAmount > 0 &&
-    targetQuantity < minBuyAmount
-  ) {
-    return rejectedResult(
-      'Quantidade abaixo do mínimo de compra da corretora.',
-      params
-    );
+  if (buy.quantity <= 0 || buy.totalCost <= 0) {
+    return {
+      validated: false,
+      approved: false,
+      status: 'rejected',
+      reason: 'Não foi possível executar a compra simulada.'
+    };
   }
 
-  if (
-    minSellAmount > 0 &&
-    targetQuantity < minSellAmount
-  ) {
-    return rejectedResult(
-      'Quantidade abaixo do mínimo de venda da corretora.',
-      params
-    );
+  const sell = calculateSellRevenue(
+    sellBook,
+    buy.quantity,
+    sellRate
+  );
+
+  const executableQuantity = Math.min(
+    buy.quantity,
+    sell.quantity
+  );
+
+  if (executableQuantity <= 0) {
+    return {
+      validated: false,
+      approved: false,
+      status: 'rejected',
+      reason: 'Liquidez insuficiente para a venda.'
+    };
   }
 
-  // ========================================
-  // EXECUÇÃO SIMULADA DA COMPRA
-  // ========================================
+  // Recalcula ambos os lados com a quantidade realmente executável.
+  const finalBuy = calculateBuyCost(
+    buyBook,
+    executableQuantity,
+    buyRate
+  );
 
-  const buy = calculateBuyCost(asks, targetQuantity);
+  const finalSell = calculateSellRevenue(
+    sellBook,
+    executableQuantity,
+    sellRate
+  );
 
-  if (!buy.complete || buy.filled <= 0) {
-    return rejectedResult(
-      'Não foi possível preencher toda a compra.',
-      params
-    );
-  }
+  const investedAmount = finalBuy.totalCost;
+  const netRevenue = finalSell.netRevenue;
 
-  const buyFeeAmount = buy.cost * buyFee;
-  const totalBuyCost = buy.cost + buyFeeAmount;
+  const netProfit = netRevenue - investedAmount;
 
-  // ========================================
-  // EXECUÇÃO SIMULADA DA VENDA
-  // ========================================
-
-  const sell = calculateSellRevenue(bids, buy.filled);
-
-  if (!sell.complete || sell.filled <= 0) {
-    return rejectedResult(
-      'Não foi possível vender toda a quantidade comprada.',
-      params
-    );
-  }
-
-  const sellFeeAmount = sell.revenue * sellFee;
-  const netSellRevenue = sell.revenue - sellFeeAmount;
-
-  // ========================================
-  // RESULTADO FINANCEIRO NA MOEDA DO PAR
-  // ========================================
-
-  const netProfit = netSellRevenue - totalBuyCost;
-
-  const profitPercent = totalBuyCost > 0
-    ? (netProfit / totalBuyCost) * 100
+  const profitPercent = investedAmount > 0
+    ? (netProfit / investedAmount) * 100
     : 0;
-
-  const netProfitBRL = netProfit * conversion;
-  const totalBuyCostBRL = totalBuyCost * conversion;
-  const netSellRevenueBRL = netSellRevenue * conversion;
-
-  // ========================================
-  // EQUIVALÊNCIA EM USD
-  // ========================================
-
-  const quoteToUSD = capital.usdToBRL !== null &&
-    capital.usdToBRL > 0
-      ? conversion / capital.usdToBRL
-      : null;
-
-  const netProfitUSD = quoteToUSD !== null
-    ? netProfit * quoteToUSD
-    : null;
-
-  const totalBuyCostUSD = quoteToUSD !== null
-    ? totalBuyCost * quoteToUSD
-    : null;
-
-  const netSellRevenueUSD = quoteToUSD !== null
-    ? netSellRevenue * quoteToUSD
-    : null;
-
-  // ========================================
-  // SLIPPAGE
-  // ========================================
-
-  const buySlippagePercent = bestAsk > 0
-    ? ((buy.vwap - bestAsk) / bestAsk) * 100
-    : Infinity;
-
-  const sellSlippagePercent = bestBid > 0
-    ? ((bestBid - sell.vwap) / bestBid) * 100
-    : Infinity;
-
-  const maximumObservedSlippage = Math.max(
-    buySlippagePercent,
-    sellSlippagePercent
-  );
-
-  // ========================================
-  // PREENCHIMENTO DO ORÇAMENTO
-  // ========================================
 
   const fillRatio = Math.min(
     1,
-    totalBuyCost / budget
+    investedAmount / budgetQuote
   );
 
-  const remainingBudget = Math.max(
-    0,
-    budget - totalBuyCost
+  const fillPercent = fillRatio * 100;
+
+  const buySlippage = buyValidation.bestAsk > 0
+    ? ((finalBuy.vwap - buyValidation.bestAsk) /
+       buyValidation.bestAsk) * 100
+    : 0;
+
+  const sellSlippage = sellValidation.bestBid > 0
+    ? ((sellValidation.bestBid - finalSell.vwap) /
+       sellValidation.bestBid) * 100
+    : 0;
+
+  const totalSlippage = Math.max(0, buySlippage) +
+    Math.max(0, sellSlippage);
+
+  const maxSlippage = number(
+    params.maxSlippagePercent,
+    MAX_SLIPPAGE_PERCENT
   );
 
-  // ========================================
-  // LIMITES MÍNIMOS DE CUSTO
-  // ========================================
-
-  const minimumBuyCostValid =
-    minBuyCost <= 0 || buy.cost >= minBuyCost;
-
-  const minimumSellCostValid =
-    minSellCost <= 0 || sell.revenue >= minSellCost;
-
-  // ========================================
-  // CRITÉRIOS DE APROVAÇÃO
-  // ========================================
-
-  const sufficientFill = fillRatio >= MIN_FILL_RATIO;
-
-  const acceptableSlippage =
-    maximumObservedSlippage <= MAX_SLIPPAGE_PERCENT;
-
-  const positiveProfit = netProfit > 0;
-
-  const minimumProfit = netProfitBRL >= MIN_NET_PROFIT_BRL;
-
-  const fullBuy = buy.complete;
-  const fullSell = sell.complete;
-
-  const minimumOrderLimitsValid =
-    minimumBuyCostValid && minimumSellCostValid;
-
-  const checks = {
-    sufficientFill,
-    acceptableSlippage,
-    positiveProfit,
-    minimumProfit,
-    fullBuy,
-    fullSell,
-    minimumOrderLimitsValid
-  };
-
-  const validated = Object.values(checks).every(
-    value => value === true
+  const minFillRatio = number(
+    params.minFillRatio,
+    MIN_FILL_RATIO
   );
 
-  // ========================================
-  // RESULTADO FINAL
-  // ========================================
+  const quoteToBRL = number(params.quoteToBRL, 0);
+  const usdToBRL = number(params.usdToBRL, 0);
 
-  return {
-    validated,
+  let netProfitBRL = null;
+  let netProfitUSD = null;
 
-    status: validated ? 'validated' : 'rejected',
-
-    reason: validated ? null : getFailureReason(checks),
-
-    // Capital selecionado
-    budgetCurrency: capital.budgetCurrency,
-    budgetAmount: capital.budgetAmount,
-
-    // Equivalências do capital
-    budgetUSD: capital.budgetUSD,
-    budgetBRL: capital.budgetBRL,
-    budgetUSDEquivalent: capital.budgetUSD,
-    budgetBRLEquivalent: capital.budgetBRL,
-
-    // Capital convertido para a moeda do par
-    budgetQuote: budget,
-
-    usedBudget: totalBuyCost,
-    remainingBudget,
-
-    fillRatio,
-
-    quantity: buy.filled,
-    buyQuantity: buy.filled,
-    sellQuantity: sell.filled,
-
-    buyPrice: buy.vwap,
-    sellPrice: sell.vwap,
-
-    bestAsk,
-    bestBid,
-
-    buyVWAP: buy.vwap,
-    sellVWAP: sell.vwap,
-
-    buyCost: buy.cost,
-    buyFeeAmount,
-    totalBuyCost,
-
-    sellRevenue: sell.revenue,
-    sellFeeAmount,
-    netSellRevenue,
-
-    buyFeePercent: number(buyFeePercent),
-    sellFeePercent: number(sellFeePercent),
-
-    grossProfit: sell.revenue - buy.cost,
-
-    netProfit,
-    netProfitBRL,
-    netProfitUSD,
-
-    totalBuyCostBRL,
-    netSellRevenueBRL,
-
-    totalBuyCostUSD,
-    netSellRevenueUSD,
-
-    profitPercent,
-
-    buySlippagePercent,
-    sellSlippagePercent,
-
-    slippagePercent: maximumObservedSlippage,
-
-    maximumAllowedSlippage: MAX_SLIPPAGE_PERCENT,
-
-    buyAvailableQuantity: getAvailableQuantity(asks),
-    sellAvailableQuantity,
-
-    minimumFillRatio: MIN_FILL_RATIO,
-    minimumNetProfitBRL: MIN_NET_PROFIT_BRL,
-
-    quoteToBRL: conversion,
-    quoteToUSD,
-
-    usdToBRL: capital.usdToBRL,
-
-    checks
-  };
-}
-
-
-// ==========================================
-// MOTIVO DA REJEIÇÃO
-// ==========================================
-
-function getFailureReason(checks) {
-  const reasons = [];
-
-  if (!checks.sufficientFill) {
-    reasons.push('Preenchimento insuficiente do orçamento');
+  if (quoteToBRL > 0) {
+    netProfitBRL = netProfit * quoteToBRL;
   }
 
-  if (!checks.acceptableSlippage) {
-    reasons.push('Slippage acima do limite permitido');
+  if (netProfitBRL !== null && usdToBRL > 0) {
+    netProfitUSD = netProfitBRL / usdToBRL;
+  } else if (capital.currency === 'USD') {
+    netProfitUSD = netProfit;
+  } else if (capital.currency === 'BRL') {
+    netProfitBRL = netProfit;
   }
 
-  if (!checks.positiveProfit) {
-    reasons.push('Lucro líquido não positivo');
-  }
+  const minimumProfitBRL = number(
+    params.minNetProfitBRL,
+    MIN_NET_PROFIT_BRL
+  );
 
-  if (!checks.minimumProfit) {
-    reasons.push('Lucro líquido abaixo do mínimo em BRL');
-  }
+  const profitCheck = netProfit > 0 &&
+    (
+      netProfitBRL === null ||
+      netProfitBRL >= minimumProfitBRL
+    );
 
-  if (!checks.fullBuy) {
-    reasons.push('Compra incompleta');
-  }
+  const slippageCheck = totalSlippage <= maxSlippage;
+  const fillCheck = fillRatio >= minFillRatio;
 
-  if (!checks.fullSell) {
-    reasons.push('Venda incompleta');
-  }
+  const approved =
+    profitCheck &&
+    slippageCheck &&
+    fillCheck;
 
-  if (!checks.minimumOrderLimitsValid) {
-    reasons.push('Valor abaixo do mínimo de ordem');
-  }
+  let reason = 'Simulação aprovada.';
 
-  return reasons.join('; ');
-}
-
-
-// ==========================================
-// RESULTADO REJEITADO
-// ==========================================
-
-function rejectedResult(reason, params = {}) {
-  const currency = ['USD', 'BRL'].includes(
-    String(params.budgetCurrency || 'USD').toUpperCase()
-  )
-    ? String(params.budgetCurrency || 'USD').toUpperCase()
-    : 'USD';
-
-  const amount = optionalNumber(params.budgetAmount) ??
-    optionalNumber(params.budgetUSD);
-
-  const usdToBRL = optionalNumber(params.usdToBRL);
-
-  let budgetUSD = null;
-  let budgetBRL = null;
-
-  if (amount !== null && amount > 0) {
-    if (currency === 'USD') {
-      budgetUSD = amount;
-      budgetBRL = usdToBRL !== null
-        ? amount * usdToBRL
-        : null;
-    } else {
-      budgetBRL = amount;
-      budgetUSD = usdToBRL !== null && usdToBRL > 0
-        ? amount / usdToBRL
-        : null;
-    }
+  if (!profitCheck) {
+    reason = 'Lucro líquido insuficiente após taxas.';
+  } else if (!slippageCheck) {
+    reason = 'Slippage acima do limite permitido.';
+  } else if (!fillCheck) {
+    reason = 'Liquidez insuficiente para preencher o capital mínimo.';
   }
 
   return {
-    validated: false,
-    status: 'rejected',
+    validated: approved,
+    approved,
+    status: approved ? 'validated' : 'rejected',
     reason,
 
-    budgetCurrency: currency,
-    budgetAmount: amount,
+    budgetCurrency: capital.currency,
+    budgetAmount: capital.amount,
+    budgetQuote,
 
-    budgetUSD,
-    budgetBRL,
-    budgetUSDEquivalent: budgetUSD,
-    budgetBRLEquivalent: budgetBRL,
+    budgetUSD: capital.budgetUSD,
+    budgetBRL: capital.budgetBRL,
 
-    budgetQuote: number(params.budgetQuote),
+    investedAmount,
+    totalBuyCost: investedAmount,
+    totalSellRevenue: finalSell.grossRevenue,
+    netRevenue,
 
-    quantity: 0,
-    buyQuantity: 0,
-    sellQuantity: 0,
+    filledQuantity: executableQuantity,
+    quantity: executableQuantity,
+    fillRatio,
+    budgetFillRatio: fillRatio,
 
-    buyCost: 0,
-    totalBuyCost: 0,
+    buyPrice: finalBuy.vwap,
+    sellPrice: finalSell.vwap,
+    buyVWAP: finalBuy.vwap,
+    sellVWAP: finalSell.vwap,
 
-    sellRevenue: 0,
-    netSellRevenue: 0,
+    buyFee: finalBuy.fee,
+    sellFee: finalSell.fee,
+    buyFeePercent,
+    sellFeePercent,
 
-    netProfit: 0,
-    netProfitBRL: 0,
-    netProfitUSD: null,
+    netProfit,
+    profit: netProfit,
+    profitPercent,
+    netProfitPercent: profitPercent,
 
-    profitPercent: 0,
-    fillRatio: 0,
+    netProfitUSD,
+    netProfitBRL,
 
-    slippagePercent: null,
+    buySlippagePercent: buySlippage,
+    sellSlippagePercent: sellSlippage,
+    slippagePercent: totalSlippage,
+
+    bestBuyPrice: buyValidation.bestAsk,
+    bestSellPrice: sellValidation.bestBid,
+
+    buyBookTimestamp: buyValidation.timestamp,
+    sellBookTimestamp: sellValidation.timestamp,
 
     checks: {
-      sufficientFill: false,
-      acceptableSlippage: false,
-      positiveProfit: false,
-      minimumProfit: false,
-      fullBuy: false,
-      fullSell: false,
-      minimumOrderLimitsValid: false
-    }
+      profit: profitCheck,
+      slippage: slippageCheck,
+      liquidity: fillCheck
+    },
+
+    realOrderSent: false,
+    simulatedAt: new Date().toISOString()
   };
 }
-
 
 // ==========================================
 // EXPORTAÇÕES
