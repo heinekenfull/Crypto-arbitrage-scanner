@@ -952,9 +952,7 @@ async function scanMarket() {
     });
   }
 
-  try {
-
-    const conversionGraph = buildConversionGraph(
+  const conversionGraph = buildConversionGraph(
       priceCollections
     );
 
@@ -1095,9 +1093,6 @@ async function scanMarket() {
 
       durationMs: Date.now() - startedAt
     };
-  } finally {
-    await closeExchangeMap(exchangeInstances);
-  }
 }
 
 // ==========================================
