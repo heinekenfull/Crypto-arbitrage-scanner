@@ -213,7 +213,12 @@ async function executeScan() {
   scannerRunning = true;
 
   try {
-    const result = await scanMarket();
+    const result = await scanMarket(progress => {
+      // Atualiza o painel antes da validação demorada dos livros.
+      // O resultado preliminar fica explicitamente marcado como tal.
+      lastScanResult = progress;
+      lastScanAt = new Date().toISOString();
+    });
 
     lastScanResult = result;
     lastScanAt = new Date().toISOString();

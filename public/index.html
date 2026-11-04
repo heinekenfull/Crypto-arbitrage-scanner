@@ -777,6 +777,11 @@ function renderOpportunities() {
 
       profitCell.className = approved ? 'profit-cell' : 'loss-cell';
       percentCell.className = approved ? 'profit-cell' : 'loss-cell';
+    } else if (item.isPreliminary === true) {
+      profitCell.textContent = 'Prévia (não validada)';
+      percentCell.textContent = '-';
+      profitCell.className = 'loss-cell';
+      percentCell.className = 'loss-cell';
     } else {
       profitCell.textContent = 'Não simulado';
       percentCell.textContent = '-';
@@ -805,8 +810,11 @@ function renderOpportunities() {
     const simulateButton = document.createElement('button');
 
     simulateButton.className = 'simulate';
-    simulateButton.textContent = 'SIMULAR 5 CAPITAIS';
-    simulateButton.disabled = simulationInProgress;
+    simulateButton.textContent = item.isPreliminary === true
+      ? 'AGUARDANDO VALIDAÇÃO'
+      : 'SIMULAR 5 CAPITAIS';
+    simulateButton.disabled =
+      simulationInProgress || item.isPreliminary === true;
 
     simulateButton.onclick = async () => {
       selectedOpportunity = item;
