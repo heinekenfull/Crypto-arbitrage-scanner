@@ -13,7 +13,7 @@ const {
 } = require('./simulation');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.2.3
+// CRYPTO ARBITRAGE SCANNER 6.2.4
 // SPOT — SIMULAÇÃO USD / BRL
 // ==========================================
 
@@ -219,7 +219,36 @@ async function fetchExchangePrices(
       );
     }
 
-    const tickers = await exchange.fetchTickers();
+    // Limita a quantidade de símbolos enviada à API.
+    // Carregar todos os tickers de todas as corretoras simultaneamente
+    // era uma das principais fontes de pressão de memória.
+    const maxMarkets = Math.max(
+      1,
+      number(config.MAX_MARKETS_PER_EXCHANGE, 300)
+    );
+
+    const symbols = Object.values(markets)
+      .filter(market =>
+        market &&
+        market.symbol &&
+        market.active !== false &&
+        market.spot !== false &&
+        QUOTE_CURRENCIES.includes(market.quote)
+      )
+      .slice(0, maxMarkets)
+      .map(market => market.symbol);
+
+    if (!symbols.length) {
+      return {
+        exchangeId,
+        prices: [],
+        marketsAnalyzed: 0,
+        fetchedAt: Date.now(),
+        connected: true
+      };
+    }
+
+    const tickers = await exchange.fetchTickers(symbols);
 
     const prices = [];
 
@@ -273,7 +302,7 @@ async function fetchExchangePrices(
     return {
       exchangeId,
       prices,
-      marketsAnalyzed: Object.keys(markets || {}).length,
+      marketsAnalyzed: symbols.length,
       fetchedAt: Date.now(),
       connected: true
     };
@@ -879,86 +908,51 @@ async function scanMarket() {
     .map(normalizeExchangeId)
     .filter(Boolean);
 
-  const exchangeInstances = new Map();
   const priceCollections = [];
   const exchangeResults = [];
 
   let marketsAnalyzed = 0;
 
-  try {
-    // Cria instâncias compartilhadas para tickers e livros.
-    const created = await mapWithConcurrency(
-      exchangeIds,
-      number(config.EXCHANGE_SCAN_CONCURRENCY, 2),
-      async exchangeId => {
-        const exchange = await createExchange(exchangeId);
+  // Consulta uma corretora por vez. Cada instância CCXT é fechada
+  // assim que seus preços compactos são extraídos.
+  const fetched = await mapWithConcurrency(
+    exchangeIds,
+    1,
+    async exchangeId => fetchExchangePrices(exchangeId)
+  );
 
-        if (!exchange) {
-          throw new Error('Falha ao criar instância.');
-        }
+  for (let i = 0; i < fetched.length; i++) {
+    const result = fetched[i];
 
-        exchangeInstances.set(exchangeId, exchange);
-
-        return exchangeId;
-      }
-    );
-
-    const connectedIds = created
-      .filter(item => typeof item === 'string');
-
-    const failedConnections = created
-      .filter(item => item && item.error);
-
-    const fetched = await mapWithConcurrency(
-      connectedIds,
-      number(config.EXCHANGE_SCAN_CONCURRENCY, 2),
-      async exchangeId => {
-        const exchange = exchangeInstances.get(exchangeId);
-
-        return fetchExchangePrices(exchangeId, exchange);
-      }
-    );
-
-    for (let i = 0; i < fetched.length; i++) {
-      const result = fetched[i];
-
-      if (result?.error) {
-        exchangeResults.push({
-          id: connectedIds[i],
-          name: connectedIds[i],
-          enabled: true,
-          connected: false,
-          status: 'error',
-          error: result.error,
-          markets: 0
-        });
-
-        continue;
-      }
-
-      if (!result) continue;
-
-      priceCollections.push(result);
-      marketsAnalyzed += number(result.marketsAnalyzed);
-
+    if (result?.error) {
       exchangeResults.push({
-        id: result.exchangeId,
-        name: result.exchangeId,
-        enabled: true,
-        connected: true,
-        status: 'connected',
-        markets: result.marketsAnalyzed
-      });
-    }
-
-    for (const failure of failedConnections) {
-      exchangeResults.push({
+        id: exchangeIds[i],
+        name: exchangeIds[i],
         enabled: true,
         connected: false,
         status: 'error',
-        error: failure.error
+        error: result.error,
+        markets: 0
       });
+      continue;
     }
+
+    if (!result) continue;
+
+    priceCollections.push(result);
+    marketsAnalyzed += number(result.marketsAnalyzed);
+
+    exchangeResults.push({
+      id: result.exchangeId,
+      name: result.exchangeId,
+      enabled: true,
+      connected: true,
+      status: 'connected',
+      markets: result.marketsAnalyzed
+    });
+  }
+
+  try {
 
     const conversionGraph = buildConversionGraph(
       priceCollections
@@ -973,15 +967,72 @@ async function scanMarket() {
       MAX_CANDIDATES
     );
 
-    const evaluated = await mapWithConcurrency(
-      selectedCandidates,
-      VALIDATION_CONCURRENCY,
-      async opportunity => evaluateCandidate(
-        opportunity,
-        conversionGraph,
-        exchangeInstances
-      )
-    );
+    // Valida por par de corretoras: no máximo duas instâncias CCXT
+    // permanecem carregadas ao mesmo tempo. Reutiliza o par para todos
+    // os candidatos correspondentes e fecha as conexões ao terminar.
+    const candidateGroups = new Map();
+
+    for (const opportunity of selectedCandidates) {
+      const key = [
+        opportunity.buyExchangeId,
+        opportunity.sellExchangeId
+      ].join('::');
+
+      if (!candidateGroups.has(key)) {
+        candidateGroups.set(key, []);
+      }
+
+      candidateGroups.get(key).push(opportunity);
+    }
+
+    const evaluated = [];
+
+    for (const group of candidateGroups.values()) {
+      const pairInstances = new Map();
+
+      try {
+        const ids = [
+          group[0].buyExchangeId,
+          group[0].sellExchangeId
+        ];
+
+        for (const exchangeId of ids) {
+          const exchange = await createExchange(exchangeId);
+          if (!exchange) {
+            throw new Error('Falha ao criar instância: ' + exchangeId);
+          }
+          pairInstances.set(exchangeId, exchange);
+        }
+
+        for (const opportunity of group) {
+          try {
+            evaluated.push(await evaluateCandidate(
+              opportunity,
+              conversionGraph,
+              pairInstances
+            ));
+          } catch (error) {
+            evaluated.push({
+              error: error.message || String(error),
+              symbol: opportunity.symbol,
+              buyExchangeId: opportunity.buyExchangeId,
+              sellExchangeId: opportunity.sellExchangeId
+            });
+          }
+        }
+      } catch (error) {
+        for (const opportunity of group) {
+          evaluated.push({
+            error: error.message || String(error),
+            symbol: opportunity.symbol,
+            buyExchangeId: opportunity.buyExchangeId,
+            sellExchangeId: opportunity.sellExchangeId
+          });
+        }
+      } finally {
+        await closeExchangeMap(pairInstances);
+      }
+    }
 
     const opportunities = evaluated
       .filter(item => item && !item.error)
@@ -1003,7 +1054,7 @@ async function scanMarket() {
     return {
       success: true,
       market: 'spot',
-      version: '6.2.3',
+      version: '6.2.4',
 
       timestamp: Date.now(),
       lastUpdated: Date.now(),
