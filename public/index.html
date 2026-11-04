@@ -1245,7 +1245,34 @@ async function initialize() {
 
   await loadSimulationHistory();
 
-  // Atualiza apenas o estado do servidor.
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
   setInterval(checkServer, 15000);
 }
 
