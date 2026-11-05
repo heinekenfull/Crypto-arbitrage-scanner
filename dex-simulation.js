@@ -177,6 +177,8 @@ function normalizeDexPair(pair, networkKey) {
     pairAddress: pair.pairAddress || '',
     pairUrl: pair.url || '',
     tokenAddress: base.address,
+    baseToken: String(base.symbol || 'TOKEN'),
+    quoteToken: String(quote.symbol || ''),
     tokenSymbol: String(base.symbol || 'TOKEN').slice(0, 24),
     tokenName: String(base.name || base.symbol || 'Token').slice(0, 50),
     quoteTokenAddress: quote.address,
