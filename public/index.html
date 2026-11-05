@@ -602,13 +602,24 @@ function renderOpportunities() {
   const currencyFor = quote => quote === 'BRL' ? 'BRL' : 'USD';
   const profitFor20 = (simulation, percent) => {
     if (simulation) {
-      const usdProfit = firstNumber(
-        simulation.netProfitUSD,
-        simulation.netProfitUsd,
-        (['USDT', 'USDC', 'USD'].includes(simulation.quoteCurrency || simulation.quote) ? simulation.netProfit : null)
-      );
-      if (usdProfit !== null && usdProfit !== undefined) return usdProfit;
+      const rawUsdProfit =
+        simulation.netProfitUSD !== undefined && simulation.netProfitUSD !== null
+          ? simulation.netProfitUSD
+          : simulation.netProfitUsd;
+
+      if (rawUsdProfit !== undefined && rawUsdProfit !== null &&
+          Number.isFinite(Number(rawUsdProfit))) {
+        return Number(rawUsdProfit);
+      }
+
+      const quoteCurrency = simulation.quoteCurrency || simulation.quote;
+      if (['USDT', 'USDC', 'USD'].includes(quoteCurrency) &&
+          simulation.netProfit !== undefined && simulation.netProfit !== null &&
+          Number.isFinite(Number(simulation.netProfit))) {
+        return Number(simulation.netProfit);
+      }
     }
+
     return (20 * Number(percent || 0)) / 100;
   };
 
@@ -685,7 +696,7 @@ function renderOpportunities() {
         currencyFor(item.quote)
       );
       percentCell.textContent = formatPercent(percent);
-      estimateCell.textContent = formatMoney(profitFor20(simulation, percent), 'USD') + ' USDT';
+      estimateCell.textContent = formatMoney(profitFor20(simulation, percent), 'USD');
       profitCell.className = approved ? 'profit-cell' : 'loss-cell';
       percentCell.className = approved ? 'profit-cell' : 'loss-cell';
       statusCell.textContent = approved
