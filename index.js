@@ -70,7 +70,7 @@ app.get('/', (req, res, next) => {
   fs.readFile(path.join(__dirname, 'public', 'index.html'), 'utf8', (error, html) => {
     if (error) return next(error);
     const page = html
-      .replace(/6\.1\.0/g, VERSION)
+      .replace(/6\\.1\\.0/g, VERSION);
     res.type('html').send(page);
   });
 });
