@@ -1,6 +1,6 @@
 {
   "name": "crypto-arbitrage-scanner",
-  "version": "6.3.3",
+  "version": "6.3.4",
   "description": "Crypto Arbitrage Scanner - SPOT simulation only",
   "main": "index.js",
   "scripts": {

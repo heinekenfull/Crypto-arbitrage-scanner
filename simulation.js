@@ -2,7 +2,7 @@
 const config = require('./config');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.3.3
+// CRYPTO ARBITRAGE SCANNER 6.3.4
 // MOTOR DE SIMULAÇÃO FINANCEIRA
 // SPOT — SEM ORDENS REAIS
 // ==========================================
