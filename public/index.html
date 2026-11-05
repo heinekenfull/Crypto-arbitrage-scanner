@@ -197,6 +197,24 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 </div>
 
 
+
+<div class="panel" id="aiPanel">
+  <h2>Inteligência artificial · Padrões de mercado</h2>
+  <p class="panel-description">O módulo aprende com oportunidades observadas em varreduras concluídas. A pontuação prioriza recorrência, margens positivas, estabilidade e validações por livro de ofertas. Não é previsão garantida.</p>
+  <div class="cards">
+    <div class="card"><small>Varreduras aprendidas</small><h2 id="aiScans">0</h2></div>
+    <div class="card"><small>Padrões acompanhados</small><h2 id="aiPatterns">0</h2></div>
+    <div class="card"><small>Última atualização</small><h2 id="aiUpdated" style="font-size:14px">Aguardando</h2></div>
+  </div>
+  <div class="table-wrap" style="margin-top:14px">
+    <table style="min-width:720px">
+      <thead><tr><th>Par</th><th>Compra → venda</th><th>Pontuação IA</th><th>Confiança</th><th>Margem média</th><th>Leituras positivas</th><th>Histórico</th></tr></thead>
+      <tbody id="aiTable"><tr><td colspan="7">Aguardando histórico do scanner spot...</td></tr></tbody>
+    </table>
+  </div>
+  <p class="info-line" id="aiDisclaimer">A IA não substitui taxas, liquidez, slippage ou validação matemática.</p>
+</div>
+
 <div class="panel" id="dexPanel">
  <h2>Scanner DEX · Multi-chain</h2>
  <p class="panel-description">Descoberta automática de tokens e pools com USDC/USDT nas seis redes. O scanner compara preços entre DEXs e mostra prévias; nenhuma transação é enviada.</p>
@@ -1029,6 +1047,51 @@ async function scanDexAutomatic() {
     button.textContent = 'ATUALIZAR VARREDURA DEX';
   }
 }
+
+async function loadAIInsights() {
+  const table = document.getElementById('aiTable');
+  if (!table) return;
+  try {
+    const data = await apiRequest('/api/ai/insights');
+    document.getElementById('aiScans').textContent = data.scansObserved || 0;
+    document.getElementById('aiPatterns').textContent = data.trackedPatterns || 0;
+    document.getElementById('aiUpdated').textContent = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleTimeString('pt-BR') : 'Aguardando';
+    document.getElementById('aiDisclaimer').textContent =
+      (data.persistence === 'memory-only'
+        ? 'Histórico em memória: será reiniciado se o servidor reiniciar. Configure AI_HISTORY_FILE em um disco persistente do Render para manter o aprendizado.'
+        : 'Histórico persistido no caminho configurado. ') + (data.disclaimer || '');
+    const rows = data.top || [];
+    table.innerHTML = '';
+    if (!rows.length) {
+      table.innerHTML = '<tr><td colspan="7">Ainda não há padrões suficientes. O sistema começará a aprender após as próximas varreduras completas.</td></tr>';
+      return;
+    }
+    rows.slice(0, 12).forEach(item => {
+      const tr = document.createElement('tr');
+      const values = [
+        item.symbol,
+        item.buyExchangeId + ' → ' + item.sellExchangeId,
+        item.score + '/100',
+        item.confidence,
+        Number(item.averageNetPercent).toFixed(3) + '%',
+        Number(item.positiveRatePercent).toFixed(0) + '%',
+        item.observations + ' leituras'
+      ];
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        if (index === 2) td.className = item.score >= 70 ? 'profit-cell' : '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  } catch (error) {
+    table.innerHTML = '<tr><td colspan="7">Não foi possível carregar a análise IA: ' +
+      String(error.message || error) + '</td></tr>';
+  }
+}
+
 // EVENTOS
 // ==========================================
 
@@ -1056,6 +1119,7 @@ async function initialize() {
   }
 
   await loadSimulationHistory();
+  await loadAIInsights();
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
   setTimeout(scanDexAutomatic, 1800);
@@ -1073,6 +1137,7 @@ async function initialize() {
       latestData = result;
       updateDashboard(latestData);
       renderOpportunities();
+      await loadAIInsights();
 
       const timestamp = result.lastUpdated || result.timestamp || Date.now();
       document.getElementById('lastUpdate').textContent =
