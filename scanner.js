@@ -13,7 +13,7 @@ const {
 } = require('./simulation');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.2.6
+// CRYPTO ARBITRAGE SCANNER 6.3.2
 // SPOT — SIMULAÇÃO USD / BRL
 // ==========================================
 
@@ -88,13 +88,15 @@ function normalizeFeePercent(exchangeId, exchange, market) {
     return Math.max(0, number(configured));
   }
 
-  const marketFee = number(market?.taker, -1);
+  const marketTaker = market?.taker;
+  const marketFee = marketTaker === null || marketTaker === undefined || marketTaker === '' ? -1 : number(marketTaker, -1);
 
   if (marketFee >= 0) {
     return marketFee * 100;
   }
 
-  const exchangeFee = number(exchange?.fees?.trading?.taker, -1);
+  const exchangeTaker = exchange?.fees?.trading?.taker;
+  const exchangeFee = exchangeTaker === null || exchangeTaker === undefined || exchangeTaker === '' ? -1 : number(exchangeTaker, -1);
 
   if (exchangeFee >= 0) {
     return exchangeFee * 100;
@@ -1085,7 +1087,7 @@ async function scanMarket(onProgress = null) {
       const preliminary = {
         success: true,
         market: 'spot',
-        version: '6.0.0',
+        version: '6.3.2',
         phase: 'validating',
         isPreliminary: true,
         timestamp: Date.now(),
