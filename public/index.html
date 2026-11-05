@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crypto Arbitrage Scanner 6.3.4</title>
+<title>Crypto Arbitrage Scanner 6.3.5</title>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -98,7 +98,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 <body>
 
 <header>
-  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.3.4</div>
+  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.3.5</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
@@ -209,7 +209,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.3.4 · SPOT
+CRYPTO ARBITRAGE SCANNER 6.3.5 · SPOT
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -394,8 +394,12 @@ function renderBookValidation(opportunity) {
   }
 
   if (book.valid !== true || book.synchronized !== true) {
-    cell.textContent = 'Não validado';
+    cell.textContent = 'Rejeitado';
     cell.className = 'book-error';
+    cell.title = safeText(
+      book.reason || opportunity.validationError ||
+      'Livro ausente, inválido ou dessincronizado.'
+    );
     return cell;
   }
 
@@ -688,14 +692,14 @@ function renderOpportunities() {
 
   const best = ranked.find(row =>
     row.simulation && isApproved(row.simulation)
-  ) || ranked[0];
+  );
 
   document.getElementById('bestProfit').textContent =
-    formatPercent(best.percent);
+    best ? formatPercent(best.percent) : '—';
   document.getElementById('bestProfitMoney').textContent =
-    best.simulation
+    best
       ? formatMoney(getProfit(best.simulation), currencyFor(best.item.quote))
-      : 'Aguardando validação do livro';
+      : 'Nenhuma operação aprovada';
 
   ranked.forEach(({ item, simulation, percent }) => {
     const tr = document.createElement('tr');
@@ -732,14 +736,22 @@ function renderOpportunities() {
       statusCell.className = approved ? 'profit-cell' : 'loss-cell';
     } else {
       profitCell.textContent = '—';
-      percentCell.textContent = formatPercent(percent);
-      estimateCell.textContent = formatMoney(profitFor20(null, percent), 'USD') + ' USDT';
-      estimateCell.className = percent > 0 ? 'profit-cell' : 'loss-cell';
-      percentCell.className = percent > 0 ? 'profit-cell' : 'loss-cell';
-      statusCell.textContent = item.isPreliminary
-        ? 'Prévia · livro pendente'
-        : 'Aguardando validação';
-      statusCell.className = 'muted';
+      if (item.validationError) {
+        percentCell.textContent = '—';
+        estimateCell.textContent = '—';
+        statusCell.textContent = 'Rejeitada: ' + safeText(item.validationError);
+        statusCell.title = safeText(item.validationError);
+        statusCell.className = 'loss-cell';
+      } else {
+        percentCell.textContent = formatPercent(percent);
+        estimateCell.textContent = formatMoney(profitFor20(null, percent), 'USD') + ' USDT';
+        estimateCell.className = percent > 0 ? 'profit-cell' : 'loss-cell';
+        percentCell.className = percent > 0 ? 'profit-cell' : 'loss-cell';
+        statusCell.textContent = item.isPreliminary
+          ? 'Prévia · livro pendente'
+          : 'Aguardando validação';
+        statusCell.className = 'muted';
+      }
     }
 
     const bookCell = renderBookValidation(item);
