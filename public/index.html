@@ -220,15 +220,27 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
  <p class="panel-description">Descoberta automática de tokens e pools com USDC/USDT nas seis redes. O scanner compara preços entre DEXs e mostra prévias; nenhuma transação é enviada.</p>
  <div class="controls"><button class="primary" id="dexAutoScanButton" type="button" onclick="scanDexAutomatic()">INICIAR VARREDURA AUTOMÁTICA</button><span class="info-line" id="dexAutoUpdated">Aguardando primeira varredura.</span></div>
  <div class="table-wrap"><table class="dex-table"><thead><tr><th>Rede</th><th>Token</th><th>Comprar em</th><th>Vender em</th><th>Spread bruto</th><th>Liquidez mínima</th><th>Ação</th></tr></thead><tbody id="dexAutoTable"><tr><td colspan="7">Aguardando varredura automática.</td></tr></tbody></table></div>
+ <h3>Consulta de pools</h3>
  <div class="dex-network-row">
   <div class="control-group"><label for="dexNetwork">Rede</label><select id="dexNetwork"><option value="ethereum">Ethereum</option><option value="bsc">BNB Chain</option><option value="polygon">Polygon</option><option value="arbitrum">Arbitrum</option><option value="base">Base</option><option value="solana">Solana</option></select></div>
-  <div class="control-group"><label for="dexTokenAddress">Endereço do contrato / mint</label><input id="dexTokenAddress" type="text" autocomplete="off" placeholder="Cole o endereço do token"></div>
-  <button class="primary" id="dexScanButton" onclick="scanDexPools()">ANALISAR POOLS</button>
+  <div class="control-group"><label for="dexTokenAddress">Contrato / mint do token</label><input id="dexTokenAddress" type="text" autocomplete="off" placeholder="Cole o endereço do token"></div>
+  <button class="primary" id="dexScanButton" type="button" onclick="scanDexPools()">ANALISAR POOLS</button>
  </div>
  <div id="dexStatus" class="empty">Informe a rede e o endereço do token para começar.</div>
  <div id="dexSummary" class="dex-summary"></div>
  <div class="table-wrap"><table class="dex-table"><thead><tr><th>DEX / Pool</th><th>Par</th><th>Preço do token (USD)</th><th>Liquidez (USD)</th><th>Volume 24h (USD)</th><th>Variação 24h</th></tr></thead><tbody id="dexPoolTable"><tr><td colspan="6">Nenhuma consulta realizada.</td></tr></tbody></table></div>
- <p class="dex-disclaimer">A diferença exibida é bruta e indicativa. Ainda não representa arbitragem executável nem lucro líquido: gas, taxas de swap, impacto de preço, slippage e bridges não estão descontados. Nenhuma carteira é conectada e nenhuma transação é enviada.</p>
+ <h3>Simulação de rota DEX (compra + venda)</h3>
+ <p class="info-line" id="dexProviderStatus">Verificando provedores de cotação...</p>
+ <div class="dex-network-row">
+  <div class="control-group"><label for="dexQuoteToken">Contrato / mint da stablecoin</label><input id="dexQuoteToken" type="text" autocomplete="off" placeholder="USDC ou USDT da mesma rede"></div>
+  <div class="control-group"><label for="dexTokenDecimals">Decimais do token</label><input id="dexTokenDecimals" type="number" min="0" max="18" step="1" value="18"></div>
+  <div class="control-group"><label for="dexQuoteDecimals">Decimais da stablecoin</label><input id="dexQuoteDecimals" type="number" min="0" max="18" step="1" value="6"></div>
+  <div class="control-group"><label for="dexTradeAmount">Capital (USD)</label><input id="dexTradeAmount" type="number" min="0.01" step="any" value="20"></div>
+  <div class="control-group"><label for="dexSlippage">Slippage máximo (%)</label><input id="dexSlippage" type="number" min="0.01" max="5" step="0.01" value="0.50"></div>
+  <button class="primary" id="dexSimulateButton" type="button" onclick="simulateDexRoute()">SIMULAR COMPRA E VENDA</button>
+ </div>
+ <div id="dexSimulationResult" class="empty">A simulação consulta uma rota de compra e outra de venda. Nenhuma transação será enviada.</div>
+ <p class="dex-disclaimer">A descoberta mostra preços indicativos. A simulação usa cotações de rota, impacto de preço e slippage; o lucro líquido só será mostrado quando o provedor permitir estimar o gas. Não conecta carteira nem envia transações.</p>
 </div>
 </div>
 </div>
@@ -982,6 +994,1580 @@ async function loadExchanges() {
 
 
 // ==========================================
+
+async function scanDexPools() {
+  const button = document.getElementById('dexScanButton');
+  const status = document.getElementById('dexStatus');
+  const table = document.getElementById('dexPoolTable');
+  const summary = document.getElementById('dexSummary');
+  const network = document.getElementById('dexNetwork').value;
+  const tokenAddress = document.getElementById('dexTokenAddress').value.trim();
+  if (!tokenAddress) {
+    status.textContent = 'Informe o endereço do contrato ou mint do token.';
+    return;
+  }
+  button.disabled = true;
+  button.textContent = 'CONSULTANDO POOLS...';
+  status.textContent = 'Consultando pools públicas no DexScreener...';
+  summary.innerHTML = '';
+  try {
+    const query = new URLSearchParams({ network, tokenAddress });
+    const data = await apiRequest('/api/dex/pools?' + query.toString());
+    table.innerHTML = '';
+    (data.pools || []).forEach(pool => {
+      const tr = document.createElement('tr');
+      const values = [
+        pool.dexId || '-',
+        (pool.baseToken || '-') + ' / ' + (pool.quoteToken || '-'),
+        Number(pool.tokenPriceUsd || 0).toPrecision(8),
+        '
+  const button = document.getElementById('dexAutoScanButton');
+  const status = document.getElementById('dexAutoUpdated');
+  const table = document.getElementById('dexAutoTable');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'DESCOBRINDO TOKENS E POOLS...';
+  status.textContent = 'Consultando pares USDC/USDT e tokens recentes nas seis redes...';
+  try {
+    const data = await apiRequest('/api/dex/auto-scan');
+    table.innerHTML = '';
+    const rows = data.opportunities || [];
+    if (!rows.length) {
+      const pools = Number(data.totalPools || 0);
+      const message = pools > 0
+        ? pools + ' pools encontradas, mas não houve diferença de preço entre DEXs suficiente para formar uma oportunidade nesta varredura.'
+        : 'Nenhuma pool qualificada retornou nesta varredura. O scanner ampliou as buscas automaticamente; tente atualizar em alguns instantes.';
+      table.innerHTML = '<tr><td colspan="7">' + message + '</td></tr>';
+    }
+    rows.forEach(function (item) {
+      const tr = document.createElement('tr');
+      const values = [
+        item.network.toUpperCase(),
+        item.tokenSymbol,
+        item.buyDex,
+        item.sellDex,
+        Number(item.grossSpreadPercent).toFixed(3) + '%',
+        '$' + Number(item.minPoolLiquidityUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ];
+      values.forEach(function (value) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const action = document.createElement('td');
+      const select = document.createElement('button');
+      select.className = 'secondary';
+      select.textContent = 'USAR TOKEN';
+      select.addEventListener('click', function () {
+        document.getElementById('dexNetwork').value = item.network;
+        document.getElementById('dexTokenAddress').value = item.tokenAddress;
+        document.getElementById('dexQuoteToken').value = item.quoteTokenAddress;
+        document.getElementById('dexTokenAddress').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('dexStatus').textContent = 'Token e stablecoin preenchidos. Confira os decimais antes de simular.';
+      });
+      action.appendChild(select);
+      tr.appendChild(action);
+      table.appendChild(tr);
+    });
+    const dexCount = Object.values(data.networks || {}).reduce(function (sum, network) {
+      return sum + Number(network.dexCount || 0);
+    }, 0);
+    status.textContent = rows.length + ' prévias · ' + data.totalPools + ' pools · ' +
+      dexCount + ' DEXs · ' + data.totalOpportunities + ' oportunidades brutas · ' +
+      (data.cached ? 'resultado em cache' : 'atualizado') + ' · ' +
+      new Date(data.timestamp).toLocaleString('pt-BR');
+  } catch (error) {
+    status.textContent = 'Falha na varredura automática: ' + error.message;
+    table.innerHTML = '<tr><td colspan="7">Não foi possível descobrir oportunidades.</td></tr>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ATUALIZAR VARREDURA DEX';
+  }
+}
+
+async function loadAIInsights() {
+  const table = document.getElementById('aiTable');
+  if (!table) return;
+  try {
+    const data = await apiRequest('/api/ai/insights');
+    document.getElementById('aiScans').textContent = data.scansObserved || 0;
+    document.getElementById('aiPatterns').textContent = data.trackedPatterns || 0;
+    document.getElementById('aiUpdated').textContent = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleTimeString('pt-BR') : 'Aguardando';
+    document.getElementById('aiDisclaimer').textContent =
+      (data.persistence === 'memory-only'
+        ? 'Histórico em memória: será reiniciado se o servidor reiniciar. Configure AI_HISTORY_FILE em um disco persistente do Render para manter o aprendizado.'
+        : 'Histórico persistido no caminho configurado. ') + (data.disclaimer || '');
+    const rows = data.top || [];
+    table.innerHTML = '';
+    if (!rows.length) {
+      table.innerHTML = '<tr><td colspan="7">Ainda não há padrões suficientes. O sistema começará a aprender após as próximas varreduras completas.</td></tr>';
+      return;
+    }
+    rows.slice(0, 12).forEach(item => {
+      const tr = document.createElement('tr');
+      const values = [
+        item.symbol,
+        item.buyExchangeId + ' → ' + item.sellExchangeId,
+        item.score + '/100',
+        item.confidence,
+        Number(item.averageNetPercent).toFixed(3) + '%',
+        Number(item.positiveRatePercent).toFixed(0) + '%',
+        item.observations + ' leituras'
+      ];
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        if (index === 2) td.className = item.score >= 70 ? 'profit-cell' : '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  } catch (error) {
+    table.innerHTML = '<tr><td colspan="7">Não foi possível carregar a análise IA: ' +
+      String(error.message || error) + '</td></tr>';
+  }
+}
+
+// EVENTOS
+// ==========================================
+
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+  setMessage('Conectando ao backend...');
+
+  const health = await checkServer();
+
+  await loadExchanges();
+
+  if (health) {
+    setMessage(
+      'Backend conectado. Aguardando análise do mercado.',
+      'success'
+    );
+  } else {
+    setMessage(
+      'Não foi possível conectar ao backend. Verifique o servidor.',
+      'error'
+    );
+  }
+
+  await loadSimulationHistory();
+  await loadAIInsights();
+  await loadDexProviderStatus();
+
+  // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
+  setTimeout(scanDexAutomatic, 1800);
+  setInterval(scanDexAutomatic, 120000);
+
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+      await loadAIInsights();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
+  setInterval(checkServer, 15000);
+}
+
+initialize();
+</script>
+
+</body>
+</html>
+ + Number(pool.liquidityUsd || 0).toLocaleString('en-US', {maximumFractionDigits: 0}),
+        '
+  const button = document.getElementById('dexAutoScanButton');
+  const status = document.getElementById('dexAutoUpdated');
+  const table = document.getElementById('dexAutoTable');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'DESCOBRINDO TOKENS E POOLS...';
+  status.textContent = 'Consultando pares USDC/USDT e tokens recentes nas seis redes...';
+  try {
+    const data = await apiRequest('/api/dex/auto-scan');
+    table.innerHTML = '';
+    const rows = data.opportunities || [];
+    if (!rows.length) {
+      const pools = Number(data.totalPools || 0);
+      const message = pools > 0
+        ? pools + ' pools encontradas, mas não houve diferença de preço entre DEXs suficiente para formar uma oportunidade nesta varredura.'
+        : 'Nenhuma pool qualificada retornou nesta varredura. O scanner ampliou as buscas automaticamente; tente atualizar em alguns instantes.';
+      table.innerHTML = '<tr><td colspan="7">' + message + '</td></tr>';
+    }
+    rows.forEach(function (item) {
+      const tr = document.createElement('tr');
+      const values = [
+        item.network.toUpperCase(),
+        item.tokenSymbol,
+        item.buyDex,
+        item.sellDex,
+        Number(item.grossSpreadPercent).toFixed(3) + '%',
+        '$' + Number(item.minPoolLiquidityUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ];
+      values.forEach(function (value) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const action = document.createElement('td');
+      const select = document.createElement('button');
+      select.className = 'secondary';
+      select.textContent = 'USAR TOKEN';
+      select.addEventListener('click', function () {
+        document.getElementById('dexNetwork').value = item.network;
+        document.getElementById('dexTokenAddress').value = item.tokenAddress;
+        document.getElementById('dexQuoteToken').value = item.quoteTokenAddress;
+        document.getElementById('dexTokenAddress').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('dexStatus').textContent = 'Token e stablecoin preenchidos. Confira os decimais antes de simular.';
+      });
+      action.appendChild(select);
+      tr.appendChild(action);
+      table.appendChild(tr);
+    });
+    const dexCount = Object.values(data.networks || {}).reduce(function (sum, network) {
+      return sum + Number(network.dexCount || 0);
+    }, 0);
+    status.textContent = rows.length + ' prévias · ' + data.totalPools + ' pools · ' +
+      dexCount + ' DEXs · ' + data.totalOpportunities + ' oportunidades brutas · ' +
+      (data.cached ? 'resultado em cache' : 'atualizado') + ' · ' +
+      new Date(data.timestamp).toLocaleString('pt-BR');
+  } catch (error) {
+    status.textContent = 'Falha na varredura automática: ' + error.message;
+    table.innerHTML = '<tr><td colspan="7">Não foi possível descobrir oportunidades.</td></tr>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ATUALIZAR VARREDURA DEX';
+  }
+}
+
+async function loadAIInsights() {
+  const table = document.getElementById('aiTable');
+  if (!table) return;
+  try {
+    const data = await apiRequest('/api/ai/insights');
+    document.getElementById('aiScans').textContent = data.scansObserved || 0;
+    document.getElementById('aiPatterns').textContent = data.trackedPatterns || 0;
+    document.getElementById('aiUpdated').textContent = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleTimeString('pt-BR') : 'Aguardando';
+    document.getElementById('aiDisclaimer').textContent =
+      (data.persistence === 'memory-only'
+        ? 'Histórico em memória: será reiniciado se o servidor reiniciar. Configure AI_HISTORY_FILE em um disco persistente do Render para manter o aprendizado.'
+        : 'Histórico persistido no caminho configurado. ') + (data.disclaimer || '');
+    const rows = data.top || [];
+    table.innerHTML = '';
+    if (!rows.length) {
+      table.innerHTML = '<tr><td colspan="7">Ainda não há padrões suficientes. O sistema começará a aprender após as próximas varreduras completas.</td></tr>';
+      return;
+    }
+    rows.slice(0, 12).forEach(item => {
+      const tr = document.createElement('tr');
+      const values = [
+        item.symbol,
+        item.buyExchangeId + ' → ' + item.sellExchangeId,
+        item.score + '/100',
+        item.confidence,
+        Number(item.averageNetPercent).toFixed(3) + '%',
+        Number(item.positiveRatePercent).toFixed(0) + '%',
+        item.observations + ' leituras'
+      ];
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        if (index === 2) td.className = item.score >= 70 ? 'profit-cell' : '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  } catch (error) {
+    table.innerHTML = '<tr><td colspan="7">Não foi possível carregar a análise IA: ' +
+      String(error.message || error) + '</td></tr>';
+  }
+}
+
+// EVENTOS
+// ==========================================
+
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+  setMessage('Conectando ao backend...');
+
+  const health = await checkServer();
+
+  await loadExchanges();
+
+  if (health) {
+    setMessage(
+      'Backend conectado. Aguardando análise do mercado.',
+      'success'
+    );
+  } else {
+    setMessage(
+      'Não foi possível conectar ao backend. Verifique o servidor.',
+      'error'
+    );
+  }
+
+  await loadSimulationHistory();
+  await loadAIInsights();
+
+  // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
+  setTimeout(scanDexAutomatic, 1800);
+  setInterval(scanDexAutomatic, 120000);
+
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+      await loadAIInsights();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
+  setInterval(checkServer, 15000);
+}
+
+initialize();
+</script>
+
+</body>
+</html>
+ + Number(pool.volume24hUsd || 0).toLocaleString('en-US', {maximumFractionDigits: 0}),
+        Number(pool.priceChange24h || 0).toFixed(2) + '%'
+      ];
+      values.forEach(value => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    if (!(data.pools || []).length) {
+      table.innerHTML = '<tr><td colspan="6">Nenhuma pool encontrada para esse token nesta rede.</td></tr>';
+    }
+    const comparison = data.comparison || {};
+    [
+      ['Pools encontradas', data.poolsFound || 0],
+      ['Menor preço', comparison.lowestPricePool ? '
+  const button = document.getElementById('dexAutoScanButton');
+  const status = document.getElementById('dexAutoUpdated');
+  const table = document.getElementById('dexAutoTable');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'DESCOBRINDO TOKENS E POOLS...';
+  status.textContent = 'Consultando pares USDC/USDT e tokens recentes nas seis redes...';
+  try {
+    const data = await apiRequest('/api/dex/auto-scan');
+    table.innerHTML = '';
+    const rows = data.opportunities || [];
+    if (!rows.length) {
+      const pools = Number(data.totalPools || 0);
+      const message = pools > 0
+        ? pools + ' pools encontradas, mas não houve diferença de preço entre DEXs suficiente para formar uma oportunidade nesta varredura.'
+        : 'Nenhuma pool qualificada retornou nesta varredura. O scanner ampliou as buscas automaticamente; tente atualizar em alguns instantes.';
+      table.innerHTML = '<tr><td colspan="7">' + message + '</td></tr>';
+    }
+    rows.forEach(function (item) {
+      const tr = document.createElement('tr');
+      const values = [
+        item.network.toUpperCase(),
+        item.tokenSymbol,
+        item.buyDex,
+        item.sellDex,
+        Number(item.grossSpreadPercent).toFixed(3) + '%',
+        '$' + Number(item.minPoolLiquidityUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ];
+      values.forEach(function (value) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const action = document.createElement('td');
+      const select = document.createElement('button');
+      select.className = 'secondary';
+      select.textContent = 'USAR TOKEN';
+      select.addEventListener('click', function () {
+        document.getElementById('dexNetwork').value = item.network;
+        document.getElementById('dexTokenAddress').value = item.tokenAddress;
+        document.getElementById('dexQuoteToken').value = item.quoteTokenAddress;
+        document.getElementById('dexTokenAddress').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('dexStatus').textContent = 'Token e stablecoin preenchidos. Confira os decimais antes de simular.';
+      });
+      action.appendChild(select);
+      tr.appendChild(action);
+      table.appendChild(tr);
+    });
+    const dexCount = Object.values(data.networks || {}).reduce(function (sum, network) {
+      return sum + Number(network.dexCount || 0);
+    }, 0);
+    status.textContent = rows.length + ' prévias · ' + data.totalPools + ' pools · ' +
+      dexCount + ' DEXs · ' + data.totalOpportunities + ' oportunidades brutas · ' +
+      (data.cached ? 'resultado em cache' : 'atualizado') + ' · ' +
+      new Date(data.timestamp).toLocaleString('pt-BR');
+  } catch (error) {
+    status.textContent = 'Falha na varredura automática: ' + error.message;
+    table.innerHTML = '<tr><td colspan="7">Não foi possível descobrir oportunidades.</td></tr>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ATUALIZAR VARREDURA DEX';
+  }
+}
+
+async function loadAIInsights() {
+  const table = document.getElementById('aiTable');
+  if (!table) return;
+  try {
+    const data = await apiRequest('/api/ai/insights');
+    document.getElementById('aiScans').textContent = data.scansObserved || 0;
+    document.getElementById('aiPatterns').textContent = data.trackedPatterns || 0;
+    document.getElementById('aiUpdated').textContent = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleTimeString('pt-BR') : 'Aguardando';
+    document.getElementById('aiDisclaimer').textContent =
+      (data.persistence === 'memory-only'
+        ? 'Histórico em memória: será reiniciado se o servidor reiniciar. Configure AI_HISTORY_FILE em um disco persistente do Render para manter o aprendizado.'
+        : 'Histórico persistido no caminho configurado. ') + (data.disclaimer || '');
+    const rows = data.top || [];
+    table.innerHTML = '';
+    if (!rows.length) {
+      table.innerHTML = '<tr><td colspan="7">Ainda não há padrões suficientes. O sistema começará a aprender após as próximas varreduras completas.</td></tr>';
+      return;
+    }
+    rows.slice(0, 12).forEach(item => {
+      const tr = document.createElement('tr');
+      const values = [
+        item.symbol,
+        item.buyExchangeId + ' → ' + item.sellExchangeId,
+        item.score + '/100',
+        item.confidence,
+        Number(item.averageNetPercent).toFixed(3) + '%',
+        Number(item.positiveRatePercent).toFixed(0) + '%',
+        item.observations + ' leituras'
+      ];
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        if (index === 2) td.className = item.score >= 70 ? 'profit-cell' : '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  } catch (error) {
+    table.innerHTML = '<tr><td colspan="7">Não foi possível carregar a análise IA: ' +
+      String(error.message || error) + '</td></tr>';
+  }
+}
+
+// EVENTOS
+// ==========================================
+
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+  setMessage('Conectando ao backend...');
+
+  const health = await checkServer();
+
+  await loadExchanges();
+
+  if (health) {
+    setMessage(
+      'Backend conectado. Aguardando análise do mercado.',
+      'success'
+    );
+  } else {
+    setMessage(
+      'Não foi possível conectar ao backend. Verifique o servidor.',
+      'error'
+    );
+  }
+
+  await loadSimulationHistory();
+  await loadAIInsights();
+
+  // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
+  setTimeout(scanDexAutomatic, 1800);
+  setInterval(scanDexAutomatic, 120000);
+
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+      await loadAIInsights();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
+  setInterval(checkServer, 15000);
+}
+
+initialize();
+</script>
+
+</body>
+</html>
+ + Number(comparison.lowestPricePool.tokenPriceUsd).toPrecision(8) : '-'],
+      ['Maior preço', comparison.highestPricePool ? '
+  const button = document.getElementById('dexAutoScanButton');
+  const status = document.getElementById('dexAutoUpdated');
+  const table = document.getElementById('dexAutoTable');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'DESCOBRINDO TOKENS E POOLS...';
+  status.textContent = 'Consultando pares USDC/USDT e tokens recentes nas seis redes...';
+  try {
+    const data = await apiRequest('/api/dex/auto-scan');
+    table.innerHTML = '';
+    const rows = data.opportunities || [];
+    if (!rows.length) {
+      const pools = Number(data.totalPools || 0);
+      const message = pools > 0
+        ? pools + ' pools encontradas, mas não houve diferença de preço entre DEXs suficiente para formar uma oportunidade nesta varredura.'
+        : 'Nenhuma pool qualificada retornou nesta varredura. O scanner ampliou as buscas automaticamente; tente atualizar em alguns instantes.';
+      table.innerHTML = '<tr><td colspan="7">' + message + '</td></tr>';
+    }
+    rows.forEach(function (item) {
+      const tr = document.createElement('tr');
+      const values = [
+        item.network.toUpperCase(),
+        item.tokenSymbol,
+        item.buyDex,
+        item.sellDex,
+        Number(item.grossSpreadPercent).toFixed(3) + '%',
+        '$' + Number(item.minPoolLiquidityUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ];
+      values.forEach(function (value) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const action = document.createElement('td');
+      const select = document.createElement('button');
+      select.className = 'secondary';
+      select.textContent = 'USAR TOKEN';
+      select.addEventListener('click', function () {
+        document.getElementById('dexNetwork').value = item.network;
+        document.getElementById('dexTokenAddress').value = item.tokenAddress;
+        document.getElementById('dexQuoteToken').value = item.quoteTokenAddress;
+        document.getElementById('dexTokenAddress').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('dexStatus').textContent = 'Token e stablecoin preenchidos. Confira os decimais antes de simular.';
+      });
+      action.appendChild(select);
+      tr.appendChild(action);
+      table.appendChild(tr);
+    });
+    const dexCount = Object.values(data.networks || {}).reduce(function (sum, network) {
+      return sum + Number(network.dexCount || 0);
+    }, 0);
+    status.textContent = rows.length + ' prévias · ' + data.totalPools + ' pools · ' +
+      dexCount + ' DEXs · ' + data.totalOpportunities + ' oportunidades brutas · ' +
+      (data.cached ? 'resultado em cache' : 'atualizado') + ' · ' +
+      new Date(data.timestamp).toLocaleString('pt-BR');
+  } catch (error) {
+    status.textContent = 'Falha na varredura automática: ' + error.message;
+    table.innerHTML = '<tr><td colspan="7">Não foi possível descobrir oportunidades.</td></tr>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ATUALIZAR VARREDURA DEX';
+  }
+}
+
+async function loadAIInsights() {
+  const table = document.getElementById('aiTable');
+  if (!table) return;
+  try {
+    const data = await apiRequest('/api/ai/insights');
+    document.getElementById('aiScans').textContent = data.scansObserved || 0;
+    document.getElementById('aiPatterns').textContent = data.trackedPatterns || 0;
+    document.getElementById('aiUpdated').textContent = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleTimeString('pt-BR') : 'Aguardando';
+    document.getElementById('aiDisclaimer').textContent =
+      (data.persistence === 'memory-only'
+        ? 'Histórico em memória: será reiniciado se o servidor reiniciar. Configure AI_HISTORY_FILE em um disco persistente do Render para manter o aprendizado.'
+        : 'Histórico persistido no caminho configurado. ') + (data.disclaimer || '');
+    const rows = data.top || [];
+    table.innerHTML = '';
+    if (!rows.length) {
+      table.innerHTML = '<tr><td colspan="7">Ainda não há padrões suficientes. O sistema começará a aprender após as próximas varreduras completas.</td></tr>';
+      return;
+    }
+    rows.slice(0, 12).forEach(item => {
+      const tr = document.createElement('tr');
+      const values = [
+        item.symbol,
+        item.buyExchangeId + ' → ' + item.sellExchangeId,
+        item.score + '/100',
+        item.confidence,
+        Number(item.averageNetPercent).toFixed(3) + '%',
+        Number(item.positiveRatePercent).toFixed(0) + '%',
+        item.observations + ' leituras'
+      ];
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        if (index === 2) td.className = item.score >= 70 ? 'profit-cell' : '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  } catch (error) {
+    table.innerHTML = '<tr><td colspan="7">Não foi possível carregar a análise IA: ' +
+      String(error.message || error) + '</td></tr>';
+  }
+}
+
+// EVENTOS
+// ==========================================
+
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+  setMessage('Conectando ao backend...');
+
+  const health = await checkServer();
+
+  await loadExchanges();
+
+  if (health) {
+    setMessage(
+      'Backend conectado. Aguardando análise do mercado.',
+      'success'
+    );
+  } else {
+    setMessage(
+      'Não foi possível conectar ao backend. Verifique o servidor.',
+      'error'
+    );
+  }
+
+  await loadSimulationHistory();
+  await loadAIInsights();
+
+  // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
+  setTimeout(scanDexAutomatic, 1800);
+  setInterval(scanDexAutomatic, 120000);
+
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+      await loadAIInsights();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
+  setInterval(checkServer, 15000);
+}
+
+initialize();
+</script>
+
+</body>
+</html>
+ + Number(comparison.highestPricePool.tokenPriceUsd).toPrecision(8) : '-'],
+      ['Spread bruto', Number(comparison.grossSpreadPercent || 0).toFixed(4) + '%']
+    ].forEach(([label, value]) => {
+      const card = document.createElement('div');
+      card.className = 'result-item';
+      const small = document.createElement('small');
+      small.textContent = label;
+      const strong = document.createElement('strong');
+      strong.textContent = value;
+      card.append(small, strong);
+      summary.appendChild(card);
+    });
+    status.textContent = 'Consulta concluída · ' + (data.poolsFound || 0) +
+      ' pools · provedor ' + (data.provider || 'DexScreener') + '.';
+  } catch (error) {
+    status.textContent = 'Falha ao consultar pools: ' + error.message;
+    table.innerHTML = '<tr><td colspan="6">Não foi possível carregar as pools. Confira a rede, o contrato e os logs do backend.</td></tr>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ANALISAR POOLS';
+  }
+}
+
+async function loadDexProviderStatus() {
+  const status = document.getElementById('dexProviderStatus');
+  if (!status) return;
+  try {
+    const data = await apiRequest('/api/dex/simulation-status');
+    const evm = data.providers?.evm;
+    const sol = data.providers?.solana;
+    status.textContent = 'EVM / 0x: ' + (evm?.configured ? 'API configurada' : 'chave ZERO_EX_API_KEY ausente') +
+      ' · Solana / Jupiter: ' + (sol?.configured ? 'API configurada' : 'chave JUPITER_API_KEY ausente');
+  } catch (error) {
+    status.textContent = 'Não foi possível verificar os provedores DEX: ' + error.message;
+  }
+}
+
+async function simulateDexRoute() {
+  const button = document.getElementById('dexSimulateButton');
+  const output = document.getElementById('dexSimulationResult');
+  const payload = {
+    network: document.getElementById('dexNetwork').value,
+    tokenAddress: document.getElementById('dexTokenAddress').value.trim(),
+    quoteTokenAddress: document.getElementById('dexQuoteToken').value.trim(),
+    tokenDecimals: Number(document.getElementById('dexTokenDecimals').value),
+    quoteDecimals: Number(document.getElementById('dexQuoteDecimals').value),
+    amount: document.getElementById('dexTradeAmount').value,
+    slippageBps: Math.round(Number(document.getElementById('dexSlippage').value) * 100)
+  };
+  if (!payload.tokenAddress || !payload.quoteTokenAddress) {
+    output.textContent = 'Informe o contrato/mint do token e da stablecoin da mesma rede.';
+    return;
+  }
+  button.disabled = true;
+  button.textContent = 'COTANDO COMPRA E VENDA...';
+  output.textContent = 'Consultando rota de compra e, em seguida, rota de venda...';
+  try {
+    const data = await apiRequest('/api/dex/simulate', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    const result = data.result || {};
+    const fields = [
+      ['Provedor', data.provider || '-'],
+      ['Valor inicial', '
+  const button = document.getElementById('dexAutoScanButton');
+  const status = document.getElementById('dexAutoUpdated');
+  const table = document.getElementById('dexAutoTable');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'DESCOBRINDO TOKENS E POOLS...';
+  status.textContent = 'Consultando pares USDC/USDT e tokens recentes nas seis redes...';
+  try {
+    const data = await apiRequest('/api/dex/auto-scan');
+    table.innerHTML = '';
+    const rows = data.opportunities || [];
+    if (!rows.length) {
+      const pools = Number(data.totalPools || 0);
+      const message = pools > 0
+        ? pools + ' pools encontradas, mas não houve diferença de preço entre DEXs suficiente para formar uma oportunidade nesta varredura.'
+        : 'Nenhuma pool qualificada retornou nesta varredura. O scanner ampliou as buscas automaticamente; tente atualizar em alguns instantes.';
+      table.innerHTML = '<tr><td colspan="7">' + message + '</td></tr>';
+    }
+    rows.forEach(function (item) {
+      const tr = document.createElement('tr');
+      const values = [
+        item.network.toUpperCase(),
+        item.tokenSymbol,
+        item.buyDex,
+        item.sellDex,
+        Number(item.grossSpreadPercent).toFixed(3) + '%',
+        '$' + Number(item.minPoolLiquidityUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ];
+      values.forEach(function (value) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const action = document.createElement('td');
+      const select = document.createElement('button');
+      select.className = 'secondary';
+      select.textContent = 'USAR TOKEN';
+      select.addEventListener('click', function () {
+        document.getElementById('dexNetwork').value = item.network;
+        document.getElementById('dexTokenAddress').value = item.tokenAddress;
+        document.getElementById('dexQuoteToken').value = item.quoteTokenAddress;
+        document.getElementById('dexTokenAddress').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('dexStatus').textContent = 'Token e stablecoin preenchidos. Confira os decimais antes de simular.';
+      });
+      action.appendChild(select);
+      tr.appendChild(action);
+      table.appendChild(tr);
+    });
+    const dexCount = Object.values(data.networks || {}).reduce(function (sum, network) {
+      return sum + Number(network.dexCount || 0);
+    }, 0);
+    status.textContent = rows.length + ' prévias · ' + data.totalPools + ' pools · ' +
+      dexCount + ' DEXs · ' + data.totalOpportunities + ' oportunidades brutas · ' +
+      (data.cached ? 'resultado em cache' : 'atualizado') + ' · ' +
+      new Date(data.timestamp).toLocaleString('pt-BR');
+  } catch (error) {
+    status.textContent = 'Falha na varredura automática: ' + error.message;
+    table.innerHTML = '<tr><td colspan="7">Não foi possível descobrir oportunidades.</td></tr>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ATUALIZAR VARREDURA DEX';
+  }
+}
+
+async function loadAIInsights() {
+  const table = document.getElementById('aiTable');
+  if (!table) return;
+  try {
+    const data = await apiRequest('/api/ai/insights');
+    document.getElementById('aiScans').textContent = data.scansObserved || 0;
+    document.getElementById('aiPatterns').textContent = data.trackedPatterns || 0;
+    document.getElementById('aiUpdated').textContent = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleTimeString('pt-BR') : 'Aguardando';
+    document.getElementById('aiDisclaimer').textContent =
+      (data.persistence === 'memory-only'
+        ? 'Histórico em memória: será reiniciado se o servidor reiniciar. Configure AI_HISTORY_FILE em um disco persistente do Render para manter o aprendizado.'
+        : 'Histórico persistido no caminho configurado. ') + (data.disclaimer || '');
+    const rows = data.top || [];
+    table.innerHTML = '';
+    if (!rows.length) {
+      table.innerHTML = '<tr><td colspan="7">Ainda não há padrões suficientes. O sistema começará a aprender após as próximas varreduras completas.</td></tr>';
+      return;
+    }
+    rows.slice(0, 12).forEach(item => {
+      const tr = document.createElement('tr');
+      const values = [
+        item.symbol,
+        item.buyExchangeId + ' → ' + item.sellExchangeId,
+        item.score + '/100',
+        item.confidence,
+        Number(item.averageNetPercent).toFixed(3) + '%',
+        Number(item.positiveRatePercent).toFixed(0) + '%',
+        item.observations + ' leituras'
+      ];
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        if (index === 2) td.className = item.score >= 70 ? 'profit-cell' : '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  } catch (error) {
+    table.innerHTML = '<tr><td colspan="7">Não foi possível carregar a análise IA: ' +
+      String(error.message || error) + '</td></tr>';
+  }
+}
+
+// EVENTOS
+// ==========================================
+
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+  setMessage('Conectando ao backend...');
+
+  const health = await checkServer();
+
+  await loadExchanges();
+
+  if (health) {
+    setMessage(
+      'Backend conectado. Aguardando análise do mercado.',
+      'success'
+    );
+  } else {
+    setMessage(
+      'Não foi possível conectar ao backend. Verifique o servidor.',
+      'error'
+    );
+  }
+
+  await loadSimulationHistory();
+  await loadAIInsights();
+
+  // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
+  setTimeout(scanDexAutomatic, 1800);
+  setInterval(scanDexAutomatic, 120000);
+
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+      await loadAIInsights();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
+  setInterval(checkServer, 15000);
+}
+
+initialize();
+</script>
+
+</body>
+</html>
+ + Number(data.tradeAmount || payload.amount).toFixed(2)],
+      ['Retorno conservador antes do gas', Number(result.conservativeReturnBeforeGasPct || 0).toFixed(4) + '%'],
+      ['Lucro conservador antes do gas', '
+  const button = document.getElementById('dexAutoScanButton');
+  const status = document.getElementById('dexAutoUpdated');
+  const table = document.getElementById('dexAutoTable');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'DESCOBRINDO TOKENS E POOLS...';
+  status.textContent = 'Consultando pares USDC/USDT e tokens recentes nas seis redes...';
+  try {
+    const data = await apiRequest('/api/dex/auto-scan');
+    table.innerHTML = '';
+    const rows = data.opportunities || [];
+    if (!rows.length) {
+      const pools = Number(data.totalPools || 0);
+      const message = pools > 0
+        ? pools + ' pools encontradas, mas não houve diferença de preço entre DEXs suficiente para formar uma oportunidade nesta varredura.'
+        : 'Nenhuma pool qualificada retornou nesta varredura. O scanner ampliou as buscas automaticamente; tente atualizar em alguns instantes.';
+      table.innerHTML = '<tr><td colspan="7">' + message + '</td></tr>';
+    }
+    rows.forEach(function (item) {
+      const tr = document.createElement('tr');
+      const values = [
+        item.network.toUpperCase(),
+        item.tokenSymbol,
+        item.buyDex,
+        item.sellDex,
+        Number(item.grossSpreadPercent).toFixed(3) + '%',
+        '$' + Number(item.minPoolLiquidityUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ];
+      values.forEach(function (value) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const action = document.createElement('td');
+      const select = document.createElement('button');
+      select.className = 'secondary';
+      select.textContent = 'USAR TOKEN';
+      select.addEventListener('click', function () {
+        document.getElementById('dexNetwork').value = item.network;
+        document.getElementById('dexTokenAddress').value = item.tokenAddress;
+        document.getElementById('dexQuoteToken').value = item.quoteTokenAddress;
+        document.getElementById('dexTokenAddress').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('dexStatus').textContent = 'Token e stablecoin preenchidos. Confira os decimais antes de simular.';
+      });
+      action.appendChild(select);
+      tr.appendChild(action);
+      table.appendChild(tr);
+    });
+    const dexCount = Object.values(data.networks || {}).reduce(function (sum, network) {
+      return sum + Number(network.dexCount || 0);
+    }, 0);
+    status.textContent = rows.length + ' prévias · ' + data.totalPools + ' pools · ' +
+      dexCount + ' DEXs · ' + data.totalOpportunities + ' oportunidades brutas · ' +
+      (data.cached ? 'resultado em cache' : 'atualizado') + ' · ' +
+      new Date(data.timestamp).toLocaleString('pt-BR');
+  } catch (error) {
+    status.textContent = 'Falha na varredura automática: ' + error.message;
+    table.innerHTML = '<tr><td colspan="7">Não foi possível descobrir oportunidades.</td></tr>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ATUALIZAR VARREDURA DEX';
+  }
+}
+
+async function loadAIInsights() {
+  const table = document.getElementById('aiTable');
+  if (!table) return;
+  try {
+    const data = await apiRequest('/api/ai/insights');
+    document.getElementById('aiScans').textContent = data.scansObserved || 0;
+    document.getElementById('aiPatterns').textContent = data.trackedPatterns || 0;
+    document.getElementById('aiUpdated').textContent = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleTimeString('pt-BR') : 'Aguardando';
+    document.getElementById('aiDisclaimer').textContent =
+      (data.persistence === 'memory-only'
+        ? 'Histórico em memória: será reiniciado se o servidor reiniciar. Configure AI_HISTORY_FILE em um disco persistente do Render para manter o aprendizado.'
+        : 'Histórico persistido no caminho configurado. ') + (data.disclaimer || '');
+    const rows = data.top || [];
+    table.innerHTML = '';
+    if (!rows.length) {
+      table.innerHTML = '<tr><td colspan="7">Ainda não há padrões suficientes. O sistema começará a aprender após as próximas varreduras completas.</td></tr>';
+      return;
+    }
+    rows.slice(0, 12).forEach(item => {
+      const tr = document.createElement('tr');
+      const values = [
+        item.symbol,
+        item.buyExchangeId + ' → ' + item.sellExchangeId,
+        item.score + '/100',
+        item.confidence,
+        Number(item.averageNetPercent).toFixed(3) + '%',
+        Number(item.positiveRatePercent).toFixed(0) + '%',
+        item.observations + ' leituras'
+      ];
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        if (index === 2) td.className = item.score >= 70 ? 'profit-cell' : '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  } catch (error) {
+    table.innerHTML = '<tr><td colspan="7">Não foi possível carregar a análise IA: ' +
+      String(error.message || error) + '</td></tr>';
+  }
+}
+
+// EVENTOS
+// ==========================================
+
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+  setMessage('Conectando ao backend...');
+
+  const health = await checkServer();
+
+  await loadExchanges();
+
+  if (health) {
+    setMessage(
+      'Backend conectado. Aguardando análise do mercado.',
+      'success'
+    );
+  } else {
+    setMessage(
+      'Não foi possível conectar ao backend. Verifique o servidor.',
+      'error'
+    );
+  }
+
+  await loadSimulationHistory();
+  await loadAIInsights();
+
+  // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
+  setTimeout(scanDexAutomatic, 1800);
+  setInterval(scanDexAutomatic, 120000);
+
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+      await loadAIInsights();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
+  setInterval(checkServer, 15000);
+}
+
+initialize();
+</script>
+
+</body>
+</html>
+ + Number(result.conservativeProfitBeforeGas || 0).toFixed(6)],
+      ['Gas estimado', result.networkFeeUsd == null ? 'Não disponível' : '
+  const button = document.getElementById('dexAutoScanButton');
+  const status = document.getElementById('dexAutoUpdated');
+  const table = document.getElementById('dexAutoTable');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'DESCOBRINDO TOKENS E POOLS...';
+  status.textContent = 'Consultando pares USDC/USDT e tokens recentes nas seis redes...';
+  try {
+    const data = await apiRequest('/api/dex/auto-scan');
+    table.innerHTML = '';
+    const rows = data.opportunities || [];
+    if (!rows.length) {
+      const pools = Number(data.totalPools || 0);
+      const message = pools > 0
+        ? pools + ' pools encontradas, mas não houve diferença de preço entre DEXs suficiente para formar uma oportunidade nesta varredura.'
+        : 'Nenhuma pool qualificada retornou nesta varredura. O scanner ampliou as buscas automaticamente; tente atualizar em alguns instantes.';
+      table.innerHTML = '<tr><td colspan="7">' + message + '</td></tr>';
+    }
+    rows.forEach(function (item) {
+      const tr = document.createElement('tr');
+      const values = [
+        item.network.toUpperCase(),
+        item.tokenSymbol,
+        item.buyDex,
+        item.sellDex,
+        Number(item.grossSpreadPercent).toFixed(3) + '%',
+        '$' + Number(item.minPoolLiquidityUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ];
+      values.forEach(function (value) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const action = document.createElement('td');
+      const select = document.createElement('button');
+      select.className = 'secondary';
+      select.textContent = 'USAR TOKEN';
+      select.addEventListener('click', function () {
+        document.getElementById('dexNetwork').value = item.network;
+        document.getElementById('dexTokenAddress').value = item.tokenAddress;
+        document.getElementById('dexQuoteToken').value = item.quoteTokenAddress;
+        document.getElementById('dexTokenAddress').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('dexStatus').textContent = 'Token e stablecoin preenchidos. Confira os decimais antes de simular.';
+      });
+      action.appendChild(select);
+      tr.appendChild(action);
+      table.appendChild(tr);
+    });
+    const dexCount = Object.values(data.networks || {}).reduce(function (sum, network) {
+      return sum + Number(network.dexCount || 0);
+    }, 0);
+    status.textContent = rows.length + ' prévias · ' + data.totalPools + ' pools · ' +
+      dexCount + ' DEXs · ' + data.totalOpportunities + ' oportunidades brutas · ' +
+      (data.cached ? 'resultado em cache' : 'atualizado') + ' · ' +
+      new Date(data.timestamp).toLocaleString('pt-BR');
+  } catch (error) {
+    status.textContent = 'Falha na varredura automática: ' + error.message;
+    table.innerHTML = '<tr><td colspan="7">Não foi possível descobrir oportunidades.</td></tr>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ATUALIZAR VARREDURA DEX';
+  }
+}
+
+async function loadAIInsights() {
+  const table = document.getElementById('aiTable');
+  if (!table) return;
+  try {
+    const data = await apiRequest('/api/ai/insights');
+    document.getElementById('aiScans').textContent = data.scansObserved || 0;
+    document.getElementById('aiPatterns').textContent = data.trackedPatterns || 0;
+    document.getElementById('aiUpdated').textContent = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleTimeString('pt-BR') : 'Aguardando';
+    document.getElementById('aiDisclaimer').textContent =
+      (data.persistence === 'memory-only'
+        ? 'Histórico em memória: será reiniciado se o servidor reiniciar. Configure AI_HISTORY_FILE em um disco persistente do Render para manter o aprendizado.'
+        : 'Histórico persistido no caminho configurado. ') + (data.disclaimer || '');
+    const rows = data.top || [];
+    table.innerHTML = '';
+    if (!rows.length) {
+      table.innerHTML = '<tr><td colspan="7">Ainda não há padrões suficientes. O sistema começará a aprender após as próximas varreduras completas.</td></tr>';
+      return;
+    }
+    rows.slice(0, 12).forEach(item => {
+      const tr = document.createElement('tr');
+      const values = [
+        item.symbol,
+        item.buyExchangeId + ' → ' + item.sellExchangeId,
+        item.score + '/100',
+        item.confidence,
+        Number(item.averageNetPercent).toFixed(3) + '%',
+        Number(item.positiveRatePercent).toFixed(0) + '%',
+        item.observations + ' leituras'
+      ];
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        if (index === 2) td.className = item.score >= 70 ? 'profit-cell' : '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  } catch (error) {
+    table.innerHTML = '<tr><td colspan="7">Não foi possível carregar a análise IA: ' +
+      String(error.message || error) + '</td></tr>';
+  }
+}
+
+// EVENTOS
+// ==========================================
+
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+  setMessage('Conectando ao backend...');
+
+  const health = await checkServer();
+
+  await loadExchanges();
+
+  if (health) {
+    setMessage(
+      'Backend conectado. Aguardando análise do mercado.',
+      'success'
+    );
+  } else {
+    setMessage(
+      'Não foi possível conectar ao backend. Verifique o servidor.',
+      'error'
+    );
+  }
+
+  await loadSimulationHistory();
+  await loadAIInsights();
+
+  // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
+  setTimeout(scanDexAutomatic, 1800);
+  setInterval(scanDexAutomatic, 120000);
+
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+      await loadAIInsights();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
+  setInterval(checkServer, 15000);
+}
+
+initialize();
+</script>
+
+</body>
+</html>
+ + Number(result.networkFeeUsd).toFixed(6)],
+      ['Lucro líquido após gas', result.netProfitAfterGas == null ? 'Não calculável' : '
+  const button = document.getElementById('dexAutoScanButton');
+  const status = document.getElementById('dexAutoUpdated');
+  const table = document.getElementById('dexAutoTable');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'DESCOBRINDO TOKENS E POOLS...';
+  status.textContent = 'Consultando pares USDC/USDT e tokens recentes nas seis redes...';
+  try {
+    const data = await apiRequest('/api/dex/auto-scan');
+    table.innerHTML = '';
+    const rows = data.opportunities || [];
+    if (!rows.length) {
+      const pools = Number(data.totalPools || 0);
+      const message = pools > 0
+        ? pools + ' pools encontradas, mas não houve diferença de preço entre DEXs suficiente para formar uma oportunidade nesta varredura.'
+        : 'Nenhuma pool qualificada retornou nesta varredura. O scanner ampliou as buscas automaticamente; tente atualizar em alguns instantes.';
+      table.innerHTML = '<tr><td colspan="7">' + message + '</td></tr>';
+    }
+    rows.forEach(function (item) {
+      const tr = document.createElement('tr');
+      const values = [
+        item.network.toUpperCase(),
+        item.tokenSymbol,
+        item.buyDex,
+        item.sellDex,
+        Number(item.grossSpreadPercent).toFixed(3) + '%',
+        '$' + Number(item.minPoolLiquidityUsd).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      ];
+      values.forEach(function (value) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      const action = document.createElement('td');
+      const select = document.createElement('button');
+      select.className = 'secondary';
+      select.textContent = 'USAR TOKEN';
+      select.addEventListener('click', function () {
+        document.getElementById('dexNetwork').value = item.network;
+        document.getElementById('dexTokenAddress').value = item.tokenAddress;
+        document.getElementById('dexQuoteToken').value = item.quoteTokenAddress;
+        document.getElementById('dexTokenAddress').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('dexStatus').textContent = 'Token e stablecoin preenchidos. Confira os decimais antes de simular.';
+      });
+      action.appendChild(select);
+      tr.appendChild(action);
+      table.appendChild(tr);
+    });
+    const dexCount = Object.values(data.networks || {}).reduce(function (sum, network) {
+      return sum + Number(network.dexCount || 0);
+    }, 0);
+    status.textContent = rows.length + ' prévias · ' + data.totalPools + ' pools · ' +
+      dexCount + ' DEXs · ' + data.totalOpportunities + ' oportunidades brutas · ' +
+      (data.cached ? 'resultado em cache' : 'atualizado') + ' · ' +
+      new Date(data.timestamp).toLocaleString('pt-BR');
+  } catch (error) {
+    status.textContent = 'Falha na varredura automática: ' + error.message;
+    table.innerHTML = '<tr><td colspan="7">Não foi possível descobrir oportunidades.</td></tr>';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ATUALIZAR VARREDURA DEX';
+  }
+}
+
+async function loadAIInsights() {
+  const table = document.getElementById('aiTable');
+  if (!table) return;
+  try {
+    const data = await apiRequest('/api/ai/insights');
+    document.getElementById('aiScans').textContent = data.scansObserved || 0;
+    document.getElementById('aiPatterns').textContent = data.trackedPatterns || 0;
+    document.getElementById('aiUpdated').textContent = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleTimeString('pt-BR') : 'Aguardando';
+    document.getElementById('aiDisclaimer').textContent =
+      (data.persistence === 'memory-only'
+        ? 'Histórico em memória: será reiniciado se o servidor reiniciar. Configure AI_HISTORY_FILE em um disco persistente do Render para manter o aprendizado.'
+        : 'Histórico persistido no caminho configurado. ') + (data.disclaimer || '');
+    const rows = data.top || [];
+    table.innerHTML = '';
+    if (!rows.length) {
+      table.innerHTML = '<tr><td colspan="7">Ainda não há padrões suficientes. O sistema começará a aprender após as próximas varreduras completas.</td></tr>';
+      return;
+    }
+    rows.slice(0, 12).forEach(item => {
+      const tr = document.createElement('tr');
+      const values = [
+        item.symbol,
+        item.buyExchangeId + ' → ' + item.sellExchangeId,
+        item.score + '/100',
+        item.confidence,
+        Number(item.averageNetPercent).toFixed(3) + '%',
+        Number(item.positiveRatePercent).toFixed(0) + '%',
+        item.observations + ' leituras'
+      ];
+      values.forEach((value, index) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        if (index === 2) td.className = item.score >= 70 ? 'profit-cell' : '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  } catch (error) {
+    table.innerHTML = '<tr><td colspan="7">Não foi possível carregar a análise IA: ' +
+      String(error.message || error) + '</td></tr>';
+  }
+}
+
+// EVENTOS
+// ==========================================
+
+// ==========================================
+// INICIALIZAÇÃO
+// ==========================================
+
+async function initialize() {
+  setMessage('Conectando ao backend...');
+
+  const health = await checkServer();
+
+  await loadExchanges();
+
+  if (health) {
+    setMessage(
+      'Backend conectado. Aguardando análise do mercado.',
+      'success'
+    );
+  } else {
+    setMessage(
+      'Não foi possível conectar ao backend. Verifique o servidor.',
+      'error'
+    );
+  }
+
+  await loadSimulationHistory();
+  await loadAIInsights();
+
+  // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
+  setTimeout(scanDexAutomatic, 1800);
+  setInterval(scanDexAutomatic, 120000);
+
+  // O backend inicia a primeira varredura automaticamente.
+  // Busca o último resultado sem disparar consultas duplicadas.
+  async function refreshLastScan() {
+    try {
+      const data = await apiRequest('/api/last-scan');
+      const result = data.result || data.data || null;
+
+      if (!result || result.success !== true) return;
+
+      latestData = result;
+      updateDashboard(latestData);
+      renderOpportunities();
+      await loadAIInsights();
+
+      const timestamp = result.lastUpdated || result.timestamp || Date.now();
+      document.getElementById('lastUpdate').textContent =
+        'Última análise: ' + new Date(timestamp).toLocaleString('pt-BR');
+    } catch (error) {
+      setMessage('Falha ao atualizar oportunidades: ' + error.message, 'error');
+    }
+  }
+
+  if (health) {
+    // Aguarda o primeiro ciclo automático do backend.
+    setTimeout(refreshLastScan, 3500);
+    // Atualiza o painel com o resultado mais recente.
+    setInterval(refreshLastScan, 10000);
+  }
+
+  setInterval(checkServer, 15000);
+}
+
+initialize();
+</script>
+
+</body>
+</html>
+ + Number(result.netProfitAfterGas).toFixed(6)],
+      ['Resultado após custos', result.profitableAfterCosts === null ? 'Indeterminado' : result.profitableAfterCosts ? 'POSITIVO' : 'NEGATIVO'],
+      ['Impacto compra / venda', String(data.buy?.priceImpact ?? '-') + ' / ' + String(data.sell?.priceImpact ?? '-')],
+      ['Rotas utilizadas', [...(data.buy?.sources || []), ...(data.sell?.sources || [])].join(', ') || 'Não informado']
+    ];
+    output.innerHTML = '';
+    const grid = document.createElement('div');
+    grid.className = 'dex-summary';
+    fields.forEach(([label, value]) => {
+      const card = document.createElement('div');
+      card.className = 'result-item';
+      const small = document.createElement('small');
+      small.textContent = label;
+      const strong = document.createElement('strong');
+      strong.textContent = value;
+      card.append(small, strong);
+      grid.appendChild(card);
+    });
+    const note = document.createElement('p');
+    note.className = 'info-line';
+    note.textContent = data.explanation || 'Simulação informativa; nenhuma transação enviada.';
+    output.append(grid, note);
+  } catch (error) {
+    output.textContent = 'Simulação DEX não concluída: ' + error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'SIMULAR COMPRA E VENDA';
+  }
+}
 
 async function scanDexAutomatic() {
   const button = document.getElementById('dexAutoScanButton');
