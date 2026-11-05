@@ -158,11 +158,12 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
           <th>Preço venda</th>
           <th>Lucro líquido estimado</th>
           <th>Lucro líquido %</th>
+          <th>Lucro estimado (20 USDT)</th>
           <th>Validação</th>
         </tr>
       </thead>
       <tbody id="opportunityTable">
-        <tr><td colspan="8">Aguardando primeira análise...</td></tr>
+        <tr><td colspan="9">Aguardando primeira análise...</td></tr>
       </tbody>
     </table>
   </div>
@@ -599,6 +600,17 @@ function updateDashboard(data) {
 function renderOpportunities() {
   const table = document.getElementById('opportunityTable');
   const currencyFor = quote => quote === 'BRL' ? 'BRL' : 'USD';
+  const profitFor20 = (simulation, percent) => {
+    if (simulation) {
+      const usdProfit = firstNumber(
+        simulation.netProfitUSD,
+        simulation.netProfitUsd,
+        (['USDT', 'USDC', 'USD'].includes(simulation.quoteCurrency || simulation.quote) ? simulation.netProfit : null)
+      );
+      if (usdProfit !== null && usdProfit !== undefined) return usdProfit;
+    }
+    return (20 * Number(percent || 0)) / 100;
+  };
 
   table.innerHTML = '';
   document.getElementById('budgetDescription').textContent =
@@ -663,6 +675,7 @@ function renderOpportunities() {
 
     const profitCell = document.createElement('td');
     const percentCell = document.createElement('td');
+    const estimateCell = document.createElement('td');
     const statusCell = document.createElement('td');
 
     if (simulation) {
@@ -672,6 +685,7 @@ function renderOpportunities() {
         currencyFor(item.quote)
       );
       percentCell.textContent = formatPercent(percent);
+      estimateCell.textContent = formatMoney(profitFor20(simulation, percent), 'USD') + ' USDT';
       profitCell.className = approved ? 'profit-cell' : 'loss-cell';
       percentCell.className = approved ? 'profit-cell' : 'loss-cell';
       statusCell.textContent = approved
@@ -681,6 +695,8 @@ function renderOpportunities() {
     } else {
       profitCell.textContent = '—';
       percentCell.textContent = formatPercent(percent);
+      estimateCell.textContent = formatMoney(profitFor20(null, percent), 'USD') + ' USDT';
+      estimateCell.className = percent > 0 ? 'profit-cell' : 'loss-cell';
       percentCell.className = percent > 0 ? 'profit-cell' : 'loss-cell';
       statusCell.textContent = item.isPreliminary
         ? 'Prévia · livro pendente'
@@ -688,7 +704,7 @@ function renderOpportunities() {
       statusCell.className = 'muted';
     }
 
-    tr.append(profitCell, percentCell, statusCell);
+    tr.append(profitCell, percentCell, estimateCell, statusCell);
     table.appendChild(tr);
   });
 }
