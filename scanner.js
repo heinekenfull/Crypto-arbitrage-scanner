@@ -42,7 +42,7 @@ const MAX_SPREAD_PERCENT = Number(
 );
 
 const MAX_CANDIDATES = Math.min(
-  20,
+  30,
   Math.max(1, Number(SIM.MAX_CANDIDATES_TO_VALIDATE ?? 18))
 );
 
