@@ -20,8 +20,13 @@ const {
 const SIM = config.SIMULATION || {};
 const ARB = config.ARBITRAGE || {};
 
-const QUOTE_CURRENCIES = ['USDT', 'USDC', 'USD', 'BRL'];
-const STABLE_CURRENCIES = ['USD', 'USDT', 'USDC'];
+// Amplia a descoberta para mercados com cotação em stablecoins, moedas fiat
+// e ativos-base líquidos. A validação final continua exigindo livro real.
+const QUOTE_CURRENCIES = [
+  'USDT', 'USDC', 'USD', 'BRL', 'BTC', 'ETH', 'BNB',
+  'EUR', 'FDUSD', 'DAI', 'TUSD', 'USDE'
+];
+const STABLE_CURRENCIES = ['USD', 'USDT', 'USDC', 'DAI', 'FDUSD', 'TUSD', 'USDE'];
 
 const DEFAULT_BUDGET_USD = Math.max(1, number(SIM.DEFAULT_TRADE_BUDGET_USD, 100));
 
@@ -37,7 +42,7 @@ const MAX_SPREAD_PERCENT = Number(
 );
 
 const MAX_CANDIDATES = Math.min(
-  20,
+  30,
   Math.max(1, Number(SIM.MAX_CANDIDATES_TO_VALIDATE ?? 18))
 );
 
@@ -238,15 +243,24 @@ async function fetchExchangePrices(
       preferredBases.map((base, index) => [base, index])
     );
     const quoteRank = new Map([
-      ['USDT', 0], ['USDC', 1], ['USD', 2], ['BRL', 3]
+      ['USDT', 0], ['USDC', 1], ['USD', 2], ['BTC', 3],
+      ['ETH', 4], ['BNB', 5], ['BRL', 6], ['EUR', 7],
+      ['FDUSD', 8], ['DAI', 9], ['TUSD', 10], ['USDE', 11]
     ]);
 
+    // Não limita a descoberta a uma lista fixa de moedas-base.
+    // Todos os mercados SPOT ativos com moedas de cotação suportadas
+    // entram na seleção; ativos conhecidos têm prioridade, mas tokens
+    // novos também podem ocupar as vagas restantes.
     const eligibleMarkets = Object.values(markets)
       .filter(market =>
         market &&
         market.symbol &&
         market.active !== false &&
         market.spot !== false &&
+        market.base &&
+        market.quote &&
+        market.base !== market.quote &&
         QUOTE_CURRENCIES.includes(market.quote)
       )
       .sort((a, b) => {
