@@ -148,7 +148,7 @@ const STABLES = {
   },
   base: {
     USDC: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-    USDT: '0xfde4c96c8593536e31f229ea8f37b2ad a2699bb2'.replace(/ /g, '')
+    USDT: '0xfde4c96c8593536e31f229ea8f37b2ada2699bb2'
   },
   solana: {
     USDC: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -389,7 +389,6 @@ router.get('/pools', async (req, res) => {
       .filter(Boolean)
       .sort((a, b) => b.liquidityUsd - a.liquidityUsd)
       .slice(0, 40);
-    const prices = pools.map(pool => pool.tokenPriceUsd);
     const low = pools.length ? pools.reduce((a, b) => a.tokenPriceUsd < b.tokenPriceUsd ? a : b) : null;
     const high = pools.length ? pools.reduce((a, b) => a.tokenPriceUsd > b.tokenPriceUsd ? a : b) : null;
     res.json({
