@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crypto Arbitrage Scanner 6.3.3</title>
+<title>Crypto Arbitrage Scanner 6.3.4</title>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -98,7 +98,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 <body>
 
 <header>
-  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.3.3</div>
+  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.3.4</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
@@ -162,14 +162,12 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
           <th>Lucro líquido estimado</th>
           <th>Lucro líquido %</th>
           <th>Lucro estimado (20 USDT)</th>
-          <th>Validação da operação</th>
+          <th>Validação</th>
           <th>Livro de ofertas</th>
-          <th>Abrir compra</th>
-          <th>Abrir venda</th>
         </tr>
       </thead>
       <tbody id="opportunityTable">
-        <tr><td colspan="12">Aguardando primeira análise...</td></tr>
+        <tr><td colspan="10">Aguardando primeira análise...</td></tr>
       </tbody>
     </table>
   </div>
@@ -211,7 +209,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.3.3 · SPOT
+CRYPTO ARBITRAGE SCANNER 6.3.4 · SPOT
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -383,51 +381,6 @@ function getExchangeName(opportunity, side) {
   return opportunity.sellExchange ||
     opportunity.sell?.exchange ||
     opportunity.sellExchangeId;
-}
-
-function getTradeUrl(exchangeId, symbol) {
-  const id = String(exchangeId || '').toLowerCase();
-  const parts = String(symbol || '').toUpperCase().split('/');
-  const base = parts[0];
-  const quote = (parts[1] || '').split(':')[0];
-
-  if (!/^[A-Z0-9]{2,20}$/.test(base || '') ||
-      !/^[A-Z0-9]{2,20}$/.test(quote || '')) {
-    return null;
-  }
-
-  const pairDash = base + '-' + quote;
-  const pairUnderscore = base + '_' + quote;
-  const pairCompact = base + quote;
-
-  const urls = {
-    okx: 'https://www.okx.com/trade-spot/' + pairDash,
-    kucoin: 'https://www.kucoin.com/trade/' + pairDash,
-    mexc: 'https://www.mexc.com/exchange/' + pairUnderscore,
-    bitget: 'https://www.bitget.com/spot/' + pairCompact,
-    htx: 'https://www.htx.com/trade/' + pairUnderscore.toLowerCase(),
-    bingx: 'https://bingx.com/en/spot/' + pairCompact
-  };
-
-  return urls[id] || null;
-}
-
-function createTradeButton(exchangeId, symbol, side) {
-  const button = document.createElement('button');
-  button.className = side === 'buy' ? 'trade-buy' : 'trade-sell';
-  button.textContent = side === 'buy' ? 'COMPRAR' : 'VENDER';
-  button.title = 'Abrir o mercado ' + symbol + ' na ' + exchangeId +
-    '. Nenhuma ordem será enviada.';
-  button.addEventListener('click', function () {
-    const url = getTradeUrl(exchangeId, symbol);
-    if (!url) {
-      setMessage('Não há link direto configurado para ' + exchangeId +
-        '. Acesse a corretora pelo painel de corretoras.', 'error');
-      return;
-    }
-    window.open(url, '_blank', 'noopener,noreferrer');
-  });
-  return button;
 }
 
 function renderBookValidation(opportunity) {
@@ -790,27 +743,13 @@ function renderOpportunities() {
     }
 
     const bookCell = renderBookValidation(item);
-    const buyActionCell = document.createElement('td');
-    buyActionCell.appendChild(createTradeButton(
-      item.buyExchangeId || item.buyExchange,
-      item.symbol,
-      'buy'
-    ));
-    const sellActionCell = document.createElement('td');
-    sellActionCell.appendChild(createTradeButton(
-      item.sellExchangeId || item.sellExchange,
-      item.symbol,
-      'sell'
-    ));
 
     tr.append(
       profitCell,
       percentCell,
       estimateCell,
       statusCell,
-      bookCell,
-      buyActionCell,
-      sellActionCell
+      bookCell
     );
     table.appendChild(tr);
   });
