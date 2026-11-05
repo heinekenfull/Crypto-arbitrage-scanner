@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crypto Arbitrage Scanner 6.3.2</title>
+<title>Crypto Arbitrage Scanner 6.3.3</title>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -27,11 +27,14 @@ button,select{background:#17263b;color:white;border:1px solid #354761;border-rad
 button.primary{background:#087c60;border-color:#087c60}
 button.simulate{background:#087c60;border-color:#159b77;font-size:11px;font-weight:bold;padding:10px}
 button.secondary{background:#24354d}
+button.trade-buy{background:#075b49;border-color:#168b6c;padding:9px 11px;font-size:11px;font-weight:bold}
+button.trade-sell{background:#49331b;border-color:#9b7135;padding:9px 11px;font-size:11px;font-weight:bold}
+.book-ok{color:#35d49a;font-weight:bold}.book-pending{color:#f5c451}.book-error{color:#ff6878}
 button:disabled{opacity:.5;cursor:not-allowed}
 .panel{background:#111c2d;border:1px solid #263449;border-radius:12px;padding:18px;margin-top:18px;overflow:hidden}
 .panel-description{color:#94a3b8;font-size:13px;line-height:1.5;margin-bottom:14px}
 .table-wrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse;min-width:1100px}
+table{width:100%;border-collapse:collapse;min-width:1350px}
 th,td{text-align:left;padding:13px 10px;border-bottom:1px solid #263449;font-size:13px;white-space:nowrap}
 th{color:#94a3b8;font-weight:normal}
 .profit-cell{color:#35d49a;font-weight:bold}
@@ -71,7 +74,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
   .control-group select,button,select{width:100%;min-height:46px}
   .panel{padding:12px;margin-top:12px;border-radius:10px}
   .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
-  table{min-width:900px}
+  table{min-width:1350px}
   th,td{padding:10px 8px;font-size:11px}
   .simulation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .result-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -95,7 +98,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 <body>
 
 <header>
-  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.3.2</div>
+  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.3.3</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
@@ -159,11 +162,14 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
           <th>Lucro líquido estimado</th>
           <th>Lucro líquido %</th>
           <th>Lucro estimado (20 USDT)</th>
-          <th>Validação</th>
+          <th>Validação da operação</th>
+          <th>Livro de ofertas</th>
+          <th>Abrir compra</th>
+          <th>Abrir venda</th>
         </tr>
       </thead>
       <tbody id="opportunityTable">
-        <tr><td colspan="9">Aguardando primeira análise...</td></tr>
+        <tr><td colspan="12">Aguardando primeira análise...</td></tr>
       </tbody>
     </table>
   </div>
@@ -205,7 +211,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.3.2 · SPOT
+CRYPTO ARBITRAGE SCANNER 6.3.3 · SPOT
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -377,6 +383,83 @@ function getExchangeName(opportunity, side) {
   return opportunity.sellExchange ||
     opportunity.sell?.exchange ||
     opportunity.sellExchangeId;
+}
+
+function getTradeUrl(exchangeId, symbol) {
+  const id = String(exchangeId || '').toLowerCase();
+  const parts = String(symbol || '').toUpperCase().split('/');
+  const base = parts[0];
+  const quote = (parts[1] || '').split(':')[0];
+
+  if (!/^[A-Z0-9]{2,20}$/.test(base || '') ||
+      !/^[A-Z0-9]{2,20}$/.test(quote || '')) {
+    return null;
+  }
+
+  const pairDash = base + '-' + quote;
+  const pairUnderscore = base + '_' + quote;
+  const pairCompact = base + quote;
+
+  const urls = {
+    okx: 'https://www.okx.com/trade-spot/' + pairDash,
+    kucoin: 'https://www.kucoin.com/trade/' + pairDash,
+    mexc: 'https://www.mexc.com/exchange/' + pairUnderscore,
+    bitget: 'https://www.bitget.com/spot/' + pairCompact,
+    htx: 'https://www.htx.com/trade/' + pairUnderscore.toLowerCase(),
+    bingx: 'https://bingx.com/en/spot/' + pairCompact
+  };
+
+  return urls[id] || null;
+}
+
+function createTradeButton(exchangeId, symbol, side) {
+  const button = document.createElement('button');
+  button.className = side === 'buy' ? 'trade-buy' : 'trade-sell';
+  button.textContent = side === 'buy' ? 'COMPRAR' : 'VENDER';
+  button.title = 'Abrir o mercado ' + symbol + ' na ' + exchangeId +
+    '. Nenhuma ordem será enviada.';
+  button.addEventListener('click', function () {
+    const url = getTradeUrl(exchangeId, symbol);
+    if (!url) {
+      setMessage('Não há link direto configurado para ' + exchangeId +
+        '. Acesse a corretora pelo painel de corretoras.', 'error');
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  });
+  return button;
+}
+
+function renderBookValidation(opportunity) {
+  const book = opportunity.orderBookValidation;
+  const cell = document.createElement('td');
+
+  if (opportunity.isPreliminary || !book) {
+    cell.textContent = 'Pendente · aguardando livros';
+    cell.className = 'book-pending';
+    return cell;
+  }
+
+  if (book.valid !== true || book.synchronized !== true) {
+    cell.textContent = 'Não validado';
+    cell.className = 'book-error';
+    return cell;
+  }
+
+  const skew = numberValue(book.skewMs);
+  const buyAge = numberValue(book.buyAgeMs);
+  const sellAge = numberValue(book.sellAgeMs);
+  cell.textContent = 'OK · Δ ' + skew + 'ms';
+  cell.className = 'book-ok';
+  cell.title = 'Livro de compra: ' + buyAge + 'ms; livro de venda: ' +
+    sellAge + 'ms; dessincronia: ' + skew + 'ms. ' +
+    'Níveis compra asks/bids: ' +
+    numberValue(book.buyDepth?.asksLevels) + '/' +
+    numberValue(book.buyDepth?.bidsLevels) +
+    '; venda asks/bids: ' +
+    numberValue(book.sellDepth?.asksLevels) + '/' +
+    numberValue(book.sellDepth?.bidsLevels) + '.';
+  return cell;
 }
 
 // ==========================================
@@ -706,7 +789,29 @@ function renderOpportunities() {
       statusCell.className = 'muted';
     }
 
-    tr.append(profitCell, percentCell, estimateCell, statusCell);
+    const bookCell = renderBookValidation(item);
+    const buyActionCell = document.createElement('td');
+    buyActionCell.appendChild(createTradeButton(
+      item.buyExchangeId || item.buyExchange,
+      item.symbol,
+      'buy'
+    ));
+    const sellActionCell = document.createElement('td');
+    sellActionCell.appendChild(createTradeButton(
+      item.sellExchangeId || item.sellExchange,
+      item.symbol,
+      'sell'
+    ));
+
+    tr.append(
+      profitCell,
+      percentCell,
+      estimateCell,
+      statusCell,
+      bookCell,
+      buyActionCell,
+      sellActionCell
+    );
     table.appendChild(tr);
   });
 }
