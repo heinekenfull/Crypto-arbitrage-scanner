@@ -1087,7 +1087,7 @@ async function scanMarket(onProgress = null) {
       const preliminary = {
         success: true,
         market: 'spot',
-        version: '6.3.4',
+        version: '6.3.5',
         phase: 'validating',
         isPreliminary: true,
         timestamp: Date.now(),
@@ -1184,11 +1184,30 @@ async function scanMarket(onProgress = null) {
               pairInstances
             ));
           } catch (error) {
+            const validationError = error.message || String(error);
             evaluated.push({
-              error: error.message || String(error),
               symbol: opportunity.symbol,
+              base: opportunity.base,
+              quote: opportunity.quote,
               buyExchangeId: opportunity.buyExchangeId,
-              sellExchangeId: opportunity.sellExchangeId
+              sellExchangeId: opportunity.sellExchangeId,
+              buyExchange: opportunity.buyExchange,
+              sellExchange: opportunity.sellExchange,
+              buyPrice: opportunity.buyPrice,
+              sellPrice: opportunity.sellPrice,
+              grossSpreadPercent: opportunity.grossSpreadPercent,
+              estimatedNetPercent: opportunity.estimatedNetPercent,
+              status: 'not_validated',
+              validationError,
+              orderBookValidation: {
+                valid: false,
+                synchronized: false,
+                reason: validationError
+              },
+              simulations: [],
+              validatedBudgets: [],
+              validatedBudgetsUSD: [],
+              validatedBudgetsBRL: []
             });
           }
         }
@@ -1211,17 +1230,25 @@ async function scanMarket(onProgress = null) {
       }
     }
 
+    // Mantém também os candidatos rejeitados para que o painel
+    // mostre por que o livro não foi aprovado, em vez de fazê-los sumir.
     const opportunities = evaluated
-      .filter(item => item && !item.error)
-      .sort((a, b) =>
-        number(b.estimatedNetPercent) -
-        number(a.estimatedNetPercent)
-      );
+      .filter(Boolean)
+      .sort((a, b) => {
+        const aApproved = a.status === 'validated' ? 1 : 0;
+        const bApproved = b.status === 'validated' ? 1 : 0;
+        if (aApproved !== bApproved) return bApproved - aApproved;
+        return number(b.estimatedNetPercent) -
+          number(a.estimatedNetPercent);
+      });
 
     const rejected = evaluated
-      .filter(item => item?.error)
+      .filter(item => item?.validationError)
       .map(item => ({
-        reason: item.error
+        symbol: item.symbol,
+        buyExchangeId: item.buyExchangeId,
+        sellExchangeId: item.sellExchangeId,
+        reason: item.validationError
       }));
 
     const validatedCount = opportunities.filter(
@@ -1238,7 +1265,7 @@ async function scanMarket(onProgress = null) {
     return {
       success: true,
       market: 'spot',
-      version: '6.0.0',
+      version: '6.3.5',
       phase: 'complete',
       isPreliminary: false,
 
@@ -1253,7 +1280,7 @@ async function scanMarket(onProgress = null) {
       marketsAnalyzed,
 
       candidatesFound: candidates.length,
-      candidatesValidated: opportunities.length,
+      candidatesValidated: selectedCandidates.length,
       validatedOpportunities: validatedCount,
 
       opportunities,
@@ -1268,6 +1295,7 @@ async function scanMarket(onProgress = null) {
         candidatesChecked: selectedCandidates.length,
 
         validationErrors: rejected.length,
+        rejectedCandidates: rejected.length,
         validationConcurrency: VALIDATION_CONCURRENCY,
 
         budgetsUSD: BUDGETS_USD,
