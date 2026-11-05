@@ -208,24 +208,34 @@ async function discoverDexOpportunities() {
   if (autoScanPromise) return autoScanPromise;
 
   autoScanPromise = (async () => {
+    // Várias buscas públicas ampliam o universo de tokens sem depender de um contrato informado pelo usuário.
+    const searchQueries = ['USDC', 'USDT', 'WETH', 'WBTC', 'SOL', 'BNB'];
     const searchResults = [];
-    for (const query of ['USDC', 'USDT']) {
-      try {
-        const data = await fetchJson(
-          'https://api.dexscreener.com/latest/dex/search?q=' + encodeURIComponent(query),
-          { headers: { accept: 'application/json' } }, 9000
-        );
-        if (Array.isArray(data.pairs)) searchResults.push(...data.pairs);
-      } catch (error) {
-        console.warn('[DEX_AUTO] Busca ' + query + ': ' + error.message);
+    let searchErrors = 0;
+    let searchCursor = 0;
+
+    async function searchWorker() {
+      while (searchCursor < searchQueries.length) {
+        const query = searchQueries[searchCursor++];
+        try {
+          const data = await fetchJson(
+            'https://api.dexscreener.com/latest/dex/search?q=' + encodeURIComponent(query),
+            { headers: { accept: 'application/json' } }, 7000
+          );
+          if (Array.isArray(data.pairs)) searchResults.push(...data.pairs);
+        } catch (error) {
+          searchErrors++;
+          console.warn('[DEX_AUTO] Busca ' + query + ': ' + error.message);
+        }
       }
     }
+    await Promise.all([searchWorker(), searchWorker(), searchWorker()]);
 
     let profiles = [];
     try {
       const data = await fetchJson(
         'https://api.dexscreener.com/token-profiles/latest/v1',
-        { headers: { accept: 'application/json' } }, 9000
+        { headers: { accept: 'application/json' } }, 7000
       );
       if (Array.isArray(data)) profiles = data;
     } catch (error) {
@@ -234,6 +244,7 @@ async function discoverDexOpportunities() {
 
     const resultsByNetwork = {};
     const networkKeys = Object.keys(NETWORKS);
+
     for (const networkKey of networkKeys) {
       const stableAddresses = new Set(
         Object.values(STABLES[networkKey]).map(value =>
@@ -241,99 +252,109 @@ async function discoverDexOpportunities() {
         )
       );
       const chain = dexChainId(networkKey);
-      const seeds = new Map();
+      const addressKey = value => NETWORKS[networkKey].type === 'evm'
+        ? String(value || '').toLowerCase()
+        : String(value || '');
 
-      // Inclui sempre os mints conhecidos da rede antes dos resultados dinâmicos.
-      for (const mint of (CONFIGURED_MINTS[networkKey] || [])) {
-        const key = NETWORKS[networkKey].type === 'evm'
-          ? mint.address.toLowerCase()
-          : mint.address;
-        seeds.set(key, { address: mint.address, liquidity: Number.MAX_SAFE_INTEGER, configured: true, symbol: mint.symbol });
-      }
-
+      // Os próprios resultados da busca já são pools candidatos; isso evita perder pares
+      // quando o token pesquisado aparece no lado de cotação do pool.
+      const candidates = new Map();
+      const directPools = [];
       for (const pair of searchResults) {
         if (String(pair.chainId).toLowerCase() !== chain) continue;
-        const quoteAddress = String(pair.quoteToken?.address || '');
-        const quoteKey = NETWORKS[networkKey].type === 'evm' ? quoteAddress.toLowerCase() : quoteAddress;
-        const baseAddress = String(pair.baseToken?.address || '');
-        if (!stableAddresses.has(quoteKey) || !baseAddress) continue;
-        const liquidity = Number(pair.liquidity?.usd || 0);
-        const baseKey = NETWORKS[networkKey].type === 'evm' ? baseAddress.toLowerCase() : baseAddress;
-        const old = seeds.get(baseKey);
-        if (!old || (!old.configured && liquidity > old.liquidity)) {
-          seeds.set(baseKey, { address: baseAddress, liquidity });
+        const normalized = normalizeDexPair(pair, networkKey);
+        if (!normalized || !stableAddresses.has(addressKey(normalized.quoteTokenAddress))) continue;
+        if (normalized.liquidityUsd < 1500 || normalized.volume24hUsd < 500) continue;
+        directPools.push(normalized);
+        const key = addressKey(normalized.tokenAddress);
+        const previous = candidates.get(key);
+        if (!previous || normalized.liquidityUsd > previous.liquidity) {
+          candidates.set(key, { address: normalized.tokenAddress, liquidity: normalized.liquidityUsd });
         }
       }
 
+      // Perfis recentes só entram quando já existe uma pool estável encontrada na busca;
+      // assim evitamos gastar chamadas em tokens sem mercado de cotação conhecido.
       for (const profile of profiles) {
         if (String(profile.chainId).toLowerCase() !== chain || !profile.tokenAddress) continue;
-        const profileKey = NETWORKS[networkKey].type === 'evm'
-          ? profile.tokenAddress.toLowerCase()
-          : profile.tokenAddress;
-        if (!seeds.has(profileKey)) {
-          seeds.set(profileKey, { address: profile.tokenAddress, liquidity: 0 });
+        const key = addressKey(profile.tokenAddress);
+        if (candidates.has(key)) {
+          const old = candidates.get(key);
+          old.profile = true;
         }
       }
 
-      const configured = [...seeds.values()].filter(item => item.configured);
-      const discovered = [...seeds.values()].filter(item => !item.configured)
-        .sort((a, b) => b.liquidity - a.liquidity);
-      // Mantém o limite de oito tokens por rede para proteger a memória do Render.
-      const selected = configured.concat(discovered.slice(0, Math.max(0, 8 - configured.length)));
+      // Mantém no máximo 12 tokens por rede (incluindo os mais líquidos), com concorrência limitada.
+      // Os tokens nativos encapsulados ficam como fallback quando a busca pública não traz candidatos.
+      let selected = [...candidates.values()]
+        .sort((a, b) => b.liquidity - a.liquidity)
+        .slice(0, 12);
+      if (!selected.length) {
+        selected = (CONFIGURED_MINTS[networkKey] || []).map(item => ({
+          address: item.address, liquidity: 0, configured: true
+        }));
+      }
 
-      const pairLists = [];
+      const pairLists = directPools.slice();
       let cursor = 0;
-      async function worker() {
+      async function pairWorker() {
         while (cursor < selected.length) {
           const item = selected[cursor++];
           try {
             const pairs = await fetchJson(
               'https://api.dexscreener.com/token-pairs/v1/' + chain + '/' + encodeURIComponent(item.address),
-              { headers: { accept: 'application/json' } }, 8000
+              { headers: { accept: 'application/json' } }, 6500
             );
-            if (Array.isArray(pairs)) pairLists.push(...pairs);
+            if (Array.isArray(pairs)) {
+              for (const pair of pairs) {
+                const normalized = normalizeDexPair(pair, networkKey);
+                if (normalized && stableAddresses.has(addressKey(normalized.quoteTokenAddress))) {
+                  pairLists.push(normalized);
+                }
+              }
+            }
           } catch (error) {
             console.warn('[DEX_AUTO] ' + networkKey + ' ' + item.address + ': ' + error.message);
           }
         }
       }
-      await Promise.all([worker(), worker()]);
+      await Promise.all([pairWorker(), pairWorker(), pairWorker()]);
 
       const pools = [];
       const seenPairs = new Set();
-      for (const pair of pairLists) {
-        if (String(pair.chainId).toLowerCase() !== chain) continue;
-        const normalized = normalizeDexPair(pair, networkKey);
-        if (!normalized) continue;
-        const quoteKey = NETWORKS[networkKey].type === 'evm'
-          ? normalized.quoteTokenAddress.toLowerCase()
-          : normalized.quoteTokenAddress;
-        if (!stableAddresses.has(quoteKey)) continue;
-        if (normalized.liquidityUsd < 5000 || normalized.volume24hUsd < 1000) continue;
-        const pairKey = normalized.pairAddress || (normalized.tokenAddress + ':' + normalized.quoteTokenAddress + ':' + normalized.dexId);
+      for (const item of pairLists) {
+        const pool = item.network ? item : normalizeDexPair(item, networkKey);
+        if (!pool || pool.network !== networkKey) continue;
+        if (!stableAddresses.has(addressKey(pool.quoteTokenAddress))) continue;
+        if (pool.liquidityUsd < 1500 || pool.volume24hUsd < 500) continue;
+        const pairKey = String(pool.pairAddress || (
+          pool.tokenAddress + ':' + pool.quoteTokenAddress + ':' + pool.dexId
+        )).toLowerCase();
         if (seenPairs.has(pairKey)) continue;
         seenPairs.add(pairKey);
-        pools.push(normalized);
+        pools.push(pool);
       }
 
       const byToken = new Map();
       for (const pool of pools) {
-        const key = NETWORKS[networkKey].type === 'evm'
-          ? pool.tokenAddress.toLowerCase()
-          : pool.tokenAddress;
+        const key = addressKey(pool.tokenAddress);
         if (!byToken.has(key)) byToken.set(key, []);
         byToken.get(key).push(pool);
       }
 
       const opportunities = [];
+      let comparableTokens = 0;
       for (const tokenPools of byToken.values()) {
-        if (tokenPools.length < 2) continue;
+        const distinctDexes = new Set(tokenPools.map(pool => pool.dexId));
+        if (distinctDexes.size < 2) continue;
+        comparableTokens++;
         for (const buy of tokenPools) {
           for (const sell of tokenPools) {
             if (buy.pairAddress === sell.pairAddress || buy.dexId === sell.dexId) continue;
             if (sell.tokenPriceUsd <= buy.tokenPriceUsd) continue;
             const spread = (sell.tokenPriceUsd - buy.tokenPriceUsd) / buy.tokenPriceUsd * 100;
-            if (!Number.isFinite(spread) || spread < 0.10 || spread > 20) continue;
+            // Spread bruto de triagem: custos executáveis serão verificados na simulação de rota.
+            if (!Number.isFinite(spread) || spread < 0.05 || spread > 30) continue;
             opportunities.push({
               network: networkKey,
               tokenSymbol: buy.tokenSymbol,
@@ -351,7 +372,7 @@ async function discoverDexOpportunities() {
               sellVolume24hUsd: sell.volume24hUsd,
               buyPairUrl: buy.pairUrl,
               sellPairUrl: sell.pairUrl,
-              status: 'prévia; precisa simular rota e custos'
+              status: 'prévia bruta; confirmar com simulação de rota'
             });
           }
         }
@@ -360,10 +381,13 @@ async function discoverDexOpportunities() {
         b.grossSpreadPercent - a.grossSpreadPercent ||
         b.minPoolLiquidityUsd - a.minPoolLiquidityUsd
       );
+
       resultsByNetwork[networkKey] = {
         pools,
-        opportunities: opportunities.slice(0, 12),
-        tokensDiscovered: selected.length
+        opportunities: opportunities.slice(0, 20),
+        tokensDiscovered: selected.length,
+        comparableTokens,
+        dexCount: new Set(pools.map(pool => pool.dexId)).size
       };
     }
 
@@ -373,10 +397,12 @@ async function discoverDexOpportunities() {
       success: true,
       timestamp: new Date().toISOString(),
       networks: resultsByNetwork,
-      opportunities: allOpportunities.slice(0, 50),
+      opportunities: allOpportunities.slice(0, 80),
       totalPools: networkKeys.reduce((sum, key) => sum + resultsByNetwork[key].pools.length, 0),
       totalOpportunities: allOpportunities.length,
-      discovery: 'Universo público descoberto por busca de pares USDC/USDT e perfis recentes do DexScreener; não representa todas as pools existentes.',
+      searchQueries,
+      searchErrors,
+      discovery: 'Busca automática ampliada em pares USDC/USDT e ativos-base populares no DexScreener; comparação entre DEXs na mesma rede. Spread é bruto e precisa ser validado por cotação de ida e volta.',
       readOnly: true,
       transactionsEnabled: false
     };
@@ -390,7 +416,6 @@ async function discoverDexOpportunities() {
     autoScanPromise = null;
   }
 }
-
 router.get('/auto-scan', async (req, res) => {
   try {
     const data = await discoverDexOpportunities();
