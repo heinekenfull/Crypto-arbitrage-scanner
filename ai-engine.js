@@ -26,6 +26,7 @@ function compact(item) {
     net: finite(item.estimatedNetPercent),
     gross: finite(item.grossSpreadPercent),
     validated: item.status === 'validated',
+    present: true,
     slippage: finite(item.simulations?.[0]?.slippagePercent, -1),
     liquidity: finite(item.simulations?.[0]?.filledPercent, -1)
   };
@@ -76,12 +77,15 @@ function scorePattern(observations) {
   const reasons = [];
   if (count >= 3) reasons.push('padrão recorrente em ' + count + ' leituras');
   else reasons.push('pouco histórico disponível');
+  const presence = recent.filter(x => x.present !== false).length / Math.max(1, count);
   if (positive >= 0.7) reasons.push('margens positivas frequentes');
+  if (presence < 0.7 && count >= 3) reasons.push('oportunidade aparece de forma intermitente');
   if (validated >= 0.5) reasons.push('validação por livro em parte das leituras');
   if (stability >= 0.7 && count >= 3) reasons.push('spread relativamente estável');
   if (volatility > 1) reasons.push('grande oscilação observada');
   return { score, confidence, observations: count, averageNetPercent: Number(avg.toFixed(4)),
     positiveRatePercent: Number((positive * 100).toFixed(1)),
+    presenceRatePercent: Number((presence * 100).toFixed(1)),
     validatedRatePercent: Number((validated * 100).toFixed(1)),
     volatilityPercent: Number(volatility.toFixed(4)), reasons };
 }
@@ -99,6 +103,13 @@ function observeScan(result) {
     observations.push(compact(item));
     if (observations.length > MAX_OBSERVATIONS) observations = observations.slice(-MAX_OBSERVATIONS);
     patterns.set(key, observations);
+  }
+  // A missing pair is also a learning signal: it prevents the model from
+  // treating an old spread as continuously available after it disappears.
+  for (const [key, existing] of patterns.entries()) {
+    if (seen.has(key)) continue;
+    existing.push({ at: Date.now(), net: 0, gross: 0, validated: false, present: false, slippage: -1, liquidity: -1 });
+    if (existing.length > MAX_OBSERVATIONS) existing.splice(0, existing.length - MAX_OBSERVATIONS);
   }
   // Bound memory even if the market presents thousands of unique pairs.
   while (patterns.size > MAX_KEYS) patterns.delete(patterns.keys().next().value);
