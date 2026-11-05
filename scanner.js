@@ -867,7 +867,11 @@ async function evaluateCandidate(
     throw new Error('Não foi possível confirmar o horário de captura dos dois livros.');
   }
 
-  const bookSkewMs = Math.abs(buyReceivedAt - sellReceivedAt);
+  // Quando ambas as corretoras informam timestamp, compara os relógios
+  // das próprias cotações. Caso contrário, usa o instante local de captura.
+  const buySyncTime = buyValidation.timestamp || buyReceivedAt;
+  const sellSyncTime = sellValidation.timestamp || sellReceivedAt;
+  const bookSkewMs = Math.abs(buySyncTime - sellSyncTime);
   if (bookSkewMs > maxBookSkewMs) {
     throw new Error(
       'Livros dessincronizados (' + bookSkewMs +
