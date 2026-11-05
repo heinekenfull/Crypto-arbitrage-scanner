@@ -23,11 +23,10 @@ const ARB = config.ARBITRAGE || {};
 const QUOTE_CURRENCIES = ['USDT', 'USDC', 'USD', 'BRL'];
 const STABLE_CURRENCIES = ['USD', 'USDT', 'USDC'];
 
-const ALLOWED_BUDGET_VALUES = [50, 100, 150, 250, 500];
+const DEFAULT_BUDGET_USD = Math.max(1, number(SIM.DEFAULT_TRADE_BUDGET_USD, 100));
 
-const BUDGETS_USD = normalizeBudgets(
-  SIM.TRADE_BUDGETS_USD
-);
+// Uma única referência interna para validar liquidez e slippage.
+const BUDGETS_USD = [DEFAULT_BUDGET_USD];
 
 const MIN_PROFIT_PERCENT = Number(
   ARB.MIN_PROFIT_PERCENT ?? 0.30
@@ -59,20 +58,6 @@ const ORDERBOOK_REQUEST_TIMEOUT_MS = Math.max(
 function number(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
-}
-
-function normalizeBudgets(values) {
-  const source = Array.isArray(values)
-    ? values
-    : ALLOWED_BUDGET_VALUES;
-
-  const result = source
-    .map(Number)
-    .filter(value =>
-      ALLOWED_BUDGET_VALUES.includes(value)
-    );
-
-  return [...new Set(result)].sort((a, b) => a - b);
 }
 
 function normalizeExchangeId(exchange) {
