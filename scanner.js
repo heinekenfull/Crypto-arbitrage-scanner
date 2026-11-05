@@ -13,7 +13,7 @@ const {
 } = require('./simulation');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.3.2
+// CRYPTO ARBITRAGE SCANNER 6.3.3
 // SPOT — SIMULAÇÃO USD / BRL
 // ==========================================
 
@@ -1087,7 +1087,7 @@ async function scanMarket(onProgress = null) {
       const preliminary = {
         success: true,
         market: 'spot',
-        version: '6.3.2',
+        version: '6.3.3',
         phase: 'validating',
         isPreliminary: true,
         timestamp: Date.now(),

@@ -3,7 +3,7 @@ const ccxt = require('ccxt');
 const config = require('./config');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.3.2
+// CRYPTO ARBITRAGE SCANNER 6.3.3
 // GERENCIAMENTO DE CORRETORAS
 // SPOT — SOMENTE CONSULTA E SIMULAÇÃO
 // ==========================================
