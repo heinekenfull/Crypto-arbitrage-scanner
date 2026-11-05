@@ -24,7 +24,7 @@ const {
 } = require('./exchanges');
 
 // ==========================================
-// CRYPTO ARBITRAGE SCANNER 6.3.3 SPOT
+// CRYPTO ARBITRAGE SCANNER 6.3.4 SPOT
 // SPOT — SIMULAÇÃO USD / BRL
 // SEM ENVIO DE ORDENS REAIS
 // ==========================================
@@ -33,7 +33,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.3.3';
+const VERSION = '6.3.4';
 const ALLOWED_CURRENCIES = ['USD'];
 
 const ALLOWED_BUDGETS = [50, 100, 150, 250, 500];
