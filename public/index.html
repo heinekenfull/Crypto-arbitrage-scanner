@@ -978,7 +978,11 @@ async function scanDexAutomatic() {
     table.innerHTML = '';
     const rows = data.opportunities || [];
     if (!rows.length) {
-      table.innerHTML = '<tr><td colspan="7">Nenhuma diferença de preço com os filtros mínimos nesta varredura.</td></tr>';
+      const pools = Number(data.totalPools || 0);
+      const message = pools > 0
+        ? pools + ' pools encontradas, mas não houve diferença de preço entre DEXs suficiente para formar uma oportunidade nesta varredura.'
+        : 'Nenhuma pool qualificada retornou nesta varredura. O scanner ampliou as buscas automaticamente; tente atualizar em alguns instantes.';
+      table.innerHTML = '<tr><td colspan="7">' + message + '</td></tr>';
     }
     rows.forEach(function (item) {
       const tr = document.createElement('tr');
@@ -1010,8 +1014,11 @@ async function scanDexAutomatic() {
       tr.appendChild(action);
       table.appendChild(tr);
     });
+    const dexCount = Object.values(data.networks || {}).reduce(function (sum, network) {
+      return sum + Number(network.dexCount || 0);
+    }, 0);
     status.textContent = rows.length + ' prévias · ' + data.totalPools + ' pools · ' +
-      data.totalOpportunities + ' oportunidades brutas · ' +
+      dexCount + ' DEXs · ' + data.totalOpportunities + ' oportunidades brutas · ' +
       (data.cached ? 'resultado em cache' : 'atualizado') + ' · ' +
       new Date(data.timestamp).toLocaleString('pt-BR');
   } catch (error) {
