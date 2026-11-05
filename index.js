@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 
 const config = require('./config');
+const aiEngine = require('./ai-engine');
 
 const {
   scanMarket,
@@ -209,6 +210,7 @@ function getServerStatus() {
     simulationOnly: true,
 
     lastScanAt,
+    ai: { enabled: true, trackedPatterns: aiEngine.getInsights().trackedPatterns },
 
     currencies: ALLOWED_CURRENCIES,
 
@@ -244,6 +246,17 @@ async function executeScan() {
     lastScanResult = result;
     lastScanAt = new Date().toISOString();
 
+    // IA observa somente varreduras concluídas; não interfere na validação.
+    const aiInsights = aiEngine.observeScan(result);
+    const aiByKey = new Map((aiInsights.top || []).map(item => [
+      [item.symbol, item.buyExchangeId, item.sellExchangeId].join('|').toUpperCase(), item
+    ]));
+    result.ai = aiInsights;
+    result.opportunities = (result.opportunities || []).map(item => ({
+      ...item,
+      ai: aiByKey.get([item.symbol, item.buyExchangeId, item.sellExchangeId].join('|').toUpperCase()) || null
+    }));
+    lastScanResult = result;
     return result;
   } catch (error) {
     console.error('[SCANNER]', error);
@@ -772,6 +785,10 @@ app.get('/api/opportunities', (req, res) => {
     timestamp: lastScanAt,
     opportunities: lastScanResult?.opportunities || []
   });
+});
+
+app.get('/api/ai/insights', (req, res) => {
+  res.json({ success: true, ...aiEngine.getInsights(lastScanResult?.opportunities || []) });
 });
 
 app.get('/api/last-scan', (req, res) => {
