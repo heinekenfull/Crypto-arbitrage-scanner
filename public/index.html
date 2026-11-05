@@ -83,19 +83,19 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
   .cards{grid-template-columns:1fr}
   .simulation-grid,.result-grid,.exchange-list{grid-template-columns:1fr}
 }
-.dex-network-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:end}
-.dex-network-row input,.dex-network-row select{width:100%;min-height:44px;background:#17263b;color:#fff;border:1px solid #354761;border-radius:8px;padding:11px}
-.dex-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
-.dex-table{min-width:760px}.dex-table a{color:#35d49a;text-decoration:none}
-.dex-disclaimer{font-size:12px;color:#f5c451;line-height:1.6;margin-top:12px}
-@media(max-width:700px){.dex-network-row{grid-template-columns:1fr}.dex-table{min-width:680px}}
+
+
+
+
+
+@media(max-width:700px){}
 </style>
 </head>
 
 <body>
 
 <header>
-  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.1.0</div>
+  <div class="logo">CRYPTO ARBITRAGE SCANNER 6.3.1</div>
   <div class="status" id="serverStatus">● CONECTANDO...</div>
 </header>
 
@@ -215,38 +215,12 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
   <p class="info-line" id="aiDisclaimer">A IA não substitui taxas, liquidez, slippage ou validação matemática.</p>
 </div>
 
-<div class="panel" id="dexPanel">
- <h2>Scanner DEX · Multi-chain</h2>
- <p class="panel-description">Descoberta automática de tokens e pools com USDC/USDT nas seis redes. O scanner compara preços entre DEXs e mostra prévias; nenhuma transação é enviada.</p>
- <div class="controls"><button class="primary" id="dexAutoScanButton" type="button" onclick="scanDexAutomatic()">INICIAR VARREDURA AUTOMÁTICA</button><span class="info-line" id="dexAutoUpdated">Aguardando primeira varredura.</span></div>
- <div class="table-wrap"><table class="dex-table"><thead><tr><th>Rede</th><th>Token</th><th>Comprar em</th><th>Vender em</th><th>Spread bruto</th><th>Liquidez mínima</th><th>Ação</th></tr></thead><tbody id="dexAutoTable"><tr><td colspan="7">Aguardando varredura automática.</td></tr></tbody></table></div>
- <h3>Consulta de pools</h3>
- <div class="dex-network-row">
-  <div class="control-group"><label for="dexNetwork">Rede</label><select id="dexNetwork"><option value="ethereum">Ethereum</option><option value="bsc">BNB Chain</option><option value="polygon">Polygon</option><option value="arbitrum">Arbitrum</option><option value="base">Base</option><option value="solana">Solana</option></select></div>
-  <div class="control-group"><label for="dexTokenAddress">Contrato / mint do token</label><input id="dexTokenAddress" type="text" autocomplete="off" placeholder="Cole o endereço do token"></div>
-  <button class="primary" id="dexScanButton" type="button" onclick="scanDexPools()">ANALISAR POOLS</button>
- </div>
- <div id="dexStatus" class="empty">Informe a rede e o endereço do token para começar.</div>
- <div id="dexSummary" class="dex-summary"></div>
- <div class="table-wrap"><table class="dex-table"><thead><tr><th>DEX / Pool</th><th>Par</th><th>Preço do token (USD)</th><th>Liquidez (USD)</th><th>Volume 24h (USD)</th><th>Variação 24h</th></tr></thead><tbody id="dexPoolTable"><tr><td colspan="6">Nenhuma consulta realizada.</td></tr></tbody></table></div>
- <h3>Simulação de rota DEX (compra + venda)</h3>
- <p class="info-line" id="dexProviderStatus">Verificando provedores de cotação...</p>
- <div class="dex-network-row">
-  <div class="control-group"><label for="dexQuoteToken">Contrato / mint da stablecoin</label><input id="dexQuoteToken" type="text" autocomplete="off" placeholder="USDC ou USDT da mesma rede"></div>
-  <div class="control-group"><label for="dexTokenDecimals">Decimais do token</label><input id="dexTokenDecimals" type="number" min="0" max="18" step="1" value="18"></div>
-  <div class="control-group"><label for="dexQuoteDecimals">Decimais da stablecoin</label><input id="dexQuoteDecimals" type="number" min="0" max="18" step="1" value="6"></div>
-  <div class="control-group"><label for="dexTradeAmount">Capital (USD)</label><input id="dexTradeAmount" type="number" min="0.01" step="any" value="20"></div>
-  <div class="control-group"><label for="dexSlippage">Slippage máximo (%)</label><input id="dexSlippage" type="number" min="0.01" max="5" step="0.01" value="0.50"></div>
-  <button class="primary" id="dexSimulateButton" type="button" onclick="simulateDexRoute()">SIMULAR COMPRA E VENDA</button>
- </div>
- <div id="dexSimulationResult" class="empty">A simulação consulta uma rota de compra e outra de venda. Nenhuma transação será enviada.</div>
- <p class="dex-disclaimer">A descoberta mostra preços indicativos. A simulação usa cotações de rota, impacto de preço e slippage; o lucro líquido só será mostrado quando o provedor permitir estimar o gas. Não conecta carteira nem envia transações.</p>
-</div>
+
 </div>
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.1.0 · SPOT + DEX
+CRYPTO ARBITRAGE SCANNER 6.3.1 · SPOT
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -1157,11 +1131,11 @@ async function initialize() {
 
   await loadSimulationHistory();
   await loadAIInsights();
-  await loadDexProviderStatus();
+  
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
-  setTimeout(scanDexAutomatic, 1800);
-  setInterval(scanDexAutomatic, 120000);
+  
+  
 
   // O backend inicia a primeira varredura automaticamente.
   // Busca o último resultado sem disparar consultas duplicadas.
@@ -1340,8 +1314,8 @@ async function initialize() {
   await loadAIInsights();
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
-  setTimeout(scanDexAutomatic, 1800);
-  setInterval(scanDexAutomatic, 120000);
+  
+  
 
   // O backend inicia a primeira varredura automaticamente.
   // Busca o último resultado sem disparar consultas duplicadas.
@@ -1535,8 +1509,8 @@ async function initialize() {
   await loadAIInsights();
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
-  setTimeout(scanDexAutomatic, 1800);
-  setInterval(scanDexAutomatic, 120000);
+  
+  
 
   // O backend inicia a primeira varredura automaticamente.
   // Busca o último resultado sem disparar consultas duplicadas.
@@ -1715,8 +1689,8 @@ async function initialize() {
   await loadAIInsights();
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
-  setTimeout(scanDexAutomatic, 1800);
-  setInterval(scanDexAutomatic, 120000);
+  
+  
 
   // O backend inicia a primeira varredura automaticamente.
   // Busca o último resultado sem disparar consultas duplicadas.
@@ -1958,8 +1932,8 @@ async function initialize() {
   await loadAIInsights();
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
-  setTimeout(scanDexAutomatic, 1800);
-  setInterval(scanDexAutomatic, 120000);
+  
+  
 
   // O backend inicia a primeira varredura automaticamente.
   // Busca o último resultado sem disparar consultas duplicadas.
@@ -2139,8 +2113,8 @@ async function initialize() {
   await loadAIInsights();
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
-  setTimeout(scanDexAutomatic, 1800);
-  setInterval(scanDexAutomatic, 120000);
+  
+  
 
   // O backend inicia a primeira varredura automaticamente.
   // Busca o último resultado sem disparar consultas duplicadas.
@@ -2319,8 +2293,8 @@ async function initialize() {
   await loadAIInsights();
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
-  setTimeout(scanDexAutomatic, 1800);
-  setInterval(scanDexAutomatic, 120000);
+  
+  
 
   // O backend inicia a primeira varredura automaticamente.
   // Busca o último resultado sem disparar consultas duplicadas.
@@ -2499,8 +2473,8 @@ async function initialize() {
   await loadAIInsights();
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
-  setTimeout(scanDexAutomatic, 1800);
-  setInterval(scanDexAutomatic, 120000);
+  
+  
 
   // O backend inicia a primeira varredura automaticamente.
   // Busca o último resultado sem disparar consultas duplicadas.
@@ -2708,8 +2682,8 @@ async function initialize() {
   await loadAIInsights();
 
   // Varredura DEX independente, limitada a uma consulta a cada 2 minutos.
-  setTimeout(scanDexAutomatic, 1800);
-  setInterval(scanDexAutomatic, 120000);
+  
+  
 
   // O backend inicia a primeira varredura automaticamente.
   // Busca o último resultado sem disparar consultas duplicadas.
