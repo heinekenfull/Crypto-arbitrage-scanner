@@ -869,8 +869,14 @@ async function evaluateCandidate(
 
   // Quando ambas as corretoras informam timestamp, compara os relógios
   // das próprias cotações. Caso contrário, usa o instante local de captura.
-  const buySyncTime = buyValidation.timestamp || buyReceivedAt;
-  const sellSyncTime = sellValidation.timestamp || sellReceivedAt;
+  const bothExchangeTimestampsAvailable =
+    Boolean(buyValidation.timestamp && sellValidation.timestamp);
+  const buySyncTime = bothExchangeTimestampsAvailable
+    ? buyValidation.timestamp
+    : buyReceivedAt;
+  const sellSyncTime = bothExchangeTimestampsAvailable
+    ? sellValidation.timestamp
+    : sellReceivedAt;
   const bookSkewMs = Math.abs(buySyncTime - sellSyncTime);
   if (bookSkewMs > maxBookSkewMs) {
     throw new Error(
