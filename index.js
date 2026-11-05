@@ -34,7 +34,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.2.0';
+const VERSION = '6.3.0';
 const DEX_NETWORKS = {
  ethereum:{id:'ethereum',name:'Ethereum',type:'evm'},
  bsc:{id:'bsc',name:'BNB Chain',type:'evm'},
