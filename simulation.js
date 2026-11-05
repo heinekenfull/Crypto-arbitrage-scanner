@@ -162,29 +162,35 @@ function validateOrderBook(orderBook, options = {}) {
     };
   }
 
-  const timestamp = number(
-    orderBook.timestamp ??
+  const rawTimestamp = orderBook.timestamp ??
     orderBook.datetimeTimestamp ??
-    orderBook.info?.timestamp,
-    0
-  );
+    orderBook.info?.timestamp ??
+    (orderBook.datetime ? Date.parse(orderBook.datetime) : 0);
 
+  const timestamp = number(rawTimestamp, 0);
+  const normalizedTimestamp = timestamp > 0
+    ? (timestamp < 1e12 ? timestamp * 1000 : timestamp)
+    : 0;
+  const receivedAt = number(orderBook._receivedAt, 0);
+  const freshnessTimestamp = normalizedTimestamp || receivedAt;
   const now = Date.now();
-  const maxAge = number(
-    options.maxAgeMs,
-    MAX_BOOK_AGE_MS
-  );
+  const maxAge = number(options.maxAgeMs, MAX_BOOK_AGE_MS);
 
-  if (timestamp > 0) {
-    const normalizedTimestamp =
-      timestamp < 1e12 ? timestamp * 1000 : timestamp;
+  if (!freshnessTimestamp) {
+    return {
+      valid: false,
+      reason: 'Livro sem horário verificável de captura.'
+    };
+  }
 
-    if (now - normalizedTimestamp > maxAge) {
-      return {
-        valid: false,
-        reason: 'Livro de ofertas desatualizado.'
-      };
-    }
+  const ageMs = now - freshnessTimestamp;
+  if (ageMs < -2000 || ageMs > maxAge) {
+    return {
+      valid: false,
+      reason: ageMs < -2000
+        ? 'Horário do livro está no futuro ou inconsistente.'
+        : 'Livro de ofertas desatualizado.'
+    };
   }
 
   const spreadPercent =
@@ -210,7 +216,14 @@ function validateOrderBook(orderBook, options = {}) {
     bestAsk,
     bestBid,
     spreadPercent,
-    timestamp: timestamp || null
+    timestamp: normalizedTimestamp || null,
+    receivedAt: receivedAt || null,
+    ageMs,
+    timestampSource: normalizedTimestamp ? 'exchange' : 'local_capture',
+    asksDepthQuote: asks.reduce((sum, level) => sum + level.price * level.amount, 0),
+    bidsDepthQuote: bids.reduce((sum, level) => sum + level.price * level.amount, 0),
+    asksLevels: asks.length,
+    bidsLevels: bids.length
   };
 }
 
@@ -580,10 +593,38 @@ function simulateBudget(params = {}) {
     buyBookTimestamp: buyValidation.timestamp,
     sellBookTimestamp: sellValidation.timestamp,
 
+    orderBookValidation: {
+      buy: {
+        valid: true,
+        ageMs: buyValidation.ageMs,
+        timestampSource: buyValidation.timestampSource,
+        asksLevels: buyValidation.asksLevels,
+        bidsLevels: buyValidation.bidsLevels,
+        asksDepthQuote: buyValidation.asksDepthQuote,
+        bidsDepthQuote: buyValidation.bidsDepthQuote,
+        bestAsk: buyValidation.bestAsk,
+        bestBid: buyValidation.bestBid
+      },
+      sell: {
+        valid: true,
+        ageMs: sellValidation.ageMs,
+        timestampSource: sellValidation.timestampSource,
+        asksLevels: sellValidation.asksLevels,
+        bidsLevels: sellValidation.bidsLevels,
+        asksDepthQuote: sellValidation.asksDepthQuote,
+        bidsDepthQuote: sellValidation.bidsDepthQuote,
+        bestAsk: sellValidation.bestAsk,
+        bestBid: sellValidation.bestBid
+      },
+      synchronized: true
+    },
+
     checks: {
       profit: profitCheck,
       slippage: slippageCheck,
-      liquidity: fillCheck
+      liquidity: fillCheck,
+      buyBookValid: true,
+      sellBookValid: true
     },
 
     realOrderSent: false,

@@ -704,7 +704,7 @@ async function fetchOrderBook(exchange, symbol) {
   let timer = null;
 
   try {
-    return await Promise.race([
+    const orderBook = await Promise.race([
       exchange.fetchOrderBook(symbol, depth),
       new Promise((resolve, reject) => {
         timer = setTimeout(() => {
@@ -717,6 +717,15 @@ async function fetchOrderBook(exchange, symbol) {
         if (typeof timer.unref === 'function') timer.unref();
       })
     ]);
+
+    if (!orderBook || typeof orderBook !== 'object') {
+      throw new Error('A corretora retornou um livro de ofertas inválido.');
+    }
+
+    return {
+      ...orderBook,
+      _receivedAt: Date.now()
+    };
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -850,6 +859,32 @@ async function evaluateCandidate(
     throw new Error('Livro de venda inválido: ' + sellValidation.reason);
   }
 
+  const buyReceivedAt = number(buyOrderBook._receivedAt, 0);
+  const sellReceivedAt = number(sellOrderBook._receivedAt, 0);
+  const maxBookSkewMs = Math.max(500, number(SIM.MAX_BOOK_SKEW_MS, 5000));
+
+  if (!buyReceivedAt || !sellReceivedAt) {
+    throw new Error('Não foi possível confirmar o horário de captura dos dois livros.');
+  }
+
+  // Quando ambas as corretoras informam timestamp, compara os relógios
+  // das próprias cotações. Caso contrário, usa o instante local de captura.
+  const bothExchangeTimestampsAvailable =
+    Boolean(buyValidation.timestamp && sellValidation.timestamp);
+  const buySyncTime = bothExchangeTimestampsAvailable
+    ? buyValidation.timestamp
+    : buyReceivedAt;
+  const sellSyncTime = bothExchangeTimestampsAvailable
+    ? sellValidation.timestamp
+    : sellReceivedAt;
+  const bookSkewMs = Math.abs(buySyncTime - sellSyncTime);
+  if (bookSkewMs > maxBookSkewMs) {
+    throw new Error(
+      'Livros dessincronizados (' + bookSkewMs +
+      'ms). Limite: ' + maxBookSkewMs + 'ms.'
+    );
+  }
+
   const freshSpread = calculateGrossSpreadPercent(
     buyValidation.bestAsk,
     sellValidation.bestBid
@@ -926,6 +961,28 @@ async function evaluateCandidate(
 
     buyOrderBookTimestamp: buyOrderBook.timestamp || null,
     sellOrderBookTimestamp: sellOrderBook.timestamp || null,
+    orderBookValidation: {
+      valid: true,
+      synchronized: true,
+      skewMs: bookSkewMs,
+      maxSkewMs: maxBookSkewMs,
+      buyAgeMs: buyValidation.ageMs,
+      sellAgeMs: sellValidation.ageMs,
+      buyTimestampSource: buyValidation.timestampSource,
+      sellTimestampSource: sellValidation.timestampSource,
+      buyDepth: {
+        asksLevels: buyValidation.asksLevels,
+        bidsLevels: buyValidation.bidsLevels,
+        asksQuote: buyValidation.asksDepthQuote,
+        bidsQuote: buyValidation.bidsDepthQuote
+      },
+      sellDepth: {
+        asksLevels: sellValidation.asksLevels,
+        bidsLevels: sellValidation.bidsLevels,
+        asksQuote: sellValidation.asksDepthQuote,
+        bidsQuote: sellValidation.bidsDepthQuote
+      }
+    },
 
     validatedAt: new Date().toISOString()
   };
