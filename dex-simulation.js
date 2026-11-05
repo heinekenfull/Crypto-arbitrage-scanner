@@ -156,6 +156,17 @@ const STABLES = {
   }
 };
 
+// Mints/contratos base pré-configurados: um ativo nativo encapsulado por rede.
+// Esses endereços são consultados mesmo quando a descoberta dinâmica não encontra tokens.
+const CONFIGURED_MINTS = {
+  ethereum: [{ symbol: 'WETH', address: NETWORKS.ethereum.nativeUsdToken }],
+  bsc: [{ symbol: 'WBNB', address: NETWORKS.bsc.nativeUsdToken }],
+  polygon: [{ symbol: 'WPOL', address: NETWORKS.polygon.nativeUsdToken }],
+  arbitrum: [{ symbol: 'WETH', address: NETWORKS.arbitrum.nativeUsdToken }],
+  base: [{ symbol: 'WETH', address: NETWORKS.base.nativeUsdToken }],
+  solana: [{ symbol: 'WSOL', address: NETWORKS.solana.nativeUsdToken }]
+};
+
 const AUTO_SCAN_TTL_MS = 90000;
 let autoScanCache = { at: 0, data: null };
 let autoScanPromise = null;
@@ -232,6 +243,14 @@ async function discoverDexOpportunities() {
       const chain = dexChainId(networkKey);
       const seeds = new Map();
 
+      // Inclui sempre os mints conhecidos da rede antes dos resultados dinâmicos.
+      for (const mint of (CONFIGURED_MINTS[networkKey] || [])) {
+        const key = NETWORKS[networkKey].type === 'evm'
+          ? mint.address.toLowerCase()
+          : mint.address;
+        seeds.set(key, { address: mint.address, liquidity: Number.MAX_SAFE_INTEGER, configured: true, symbol: mint.symbol });
+      }
+
       for (const pair of searchResults) {
         if (String(pair.chainId).toLowerCase() !== chain) continue;
         const quoteAddress = String(pair.quoteToken?.address || '');
@@ -239,20 +258,28 @@ async function discoverDexOpportunities() {
         const baseAddress = String(pair.baseToken?.address || '');
         if (!stableAddresses.has(quoteKey) || !baseAddress) continue;
         const liquidity = Number(pair.liquidity?.usd || 0);
-        const old = seeds.get(baseAddress);
-        if (!old || liquidity > old.liquidity) seeds.set(baseAddress, { address: baseAddress, liquidity });
+        const baseKey = NETWORKS[networkKey].type === 'evm' ? baseAddress.toLowerCase() : baseAddress;
+        const old = seeds.get(baseKey);
+        if (!old || (!old.configured && liquidity > old.liquidity)) {
+          seeds.set(baseKey, { address: baseAddress, liquidity });
+        }
       }
 
       for (const profile of profiles) {
         if (String(profile.chainId).toLowerCase() !== chain || !profile.tokenAddress) continue;
-        if (!seeds.has(profile.tokenAddress)) {
-          seeds.set(profile.tokenAddress, { address: profile.tokenAddress, liquidity: 0 });
+        const profileKey = NETWORKS[networkKey].type === 'evm'
+          ? profile.tokenAddress.toLowerCase()
+          : profile.tokenAddress;
+        if (!seeds.has(profileKey)) {
+          seeds.set(profileKey, { address: profile.tokenAddress, liquidity: 0 });
         }
       }
 
-      const selected = [...seeds.values()]
-        .sort((a, b) => b.liquidity - a.liquidity)
-        .slice(0, 8);
+      const configured = [...seeds.values()].filter(item => item.configured);
+      const discovered = [...seeds.values()].filter(item => !item.configured)
+        .sort((a, b) => b.liquidity - a.liquidity);
+      // Mantém o limite de oito tokens por rede para proteger a memória do Render.
+      const selected = configured.concat(discovered.slice(0, Math.max(0, 8 - configured.length)));
 
       const pairLists = [];
       let cursor = 0;
