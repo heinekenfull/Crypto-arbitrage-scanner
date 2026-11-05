@@ -1,7 +1,7 @@
 {
   "name": "crypto-arbitrage-scanner",
-  "version": "1.0.0",
-  "description": "Crypto Arbitrage Scanner - Spot, Futures and DEX",
+  "version": "6.3.2",
+  "description": "Crypto Arbitrage Scanner - SPOT simulation only",
   "main": "index.js",
   "scripts": {
     "start": "node --expose-gc index.js",
