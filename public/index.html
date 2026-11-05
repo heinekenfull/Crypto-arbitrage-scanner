@@ -130,17 +130,6 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 <div class="controls">
 
   <div class="control-group">
-    <label for="budgetSelect">Capital selecionado</label>
-    <select id="budgetSelect">
-      <option value="50">50</option>
-      <option value="100" selected>100</option>
-      <option value="150">150</option>
-      <option value="250">250</option>
-      <option value="500">500</option>
-    </select>
-  </div>
-
-  <div class="control-group">
     <label>Mercado</label>
     <select disabled>
       <option>SPOT</option>
@@ -167,40 +156,15 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
           <th>Vender</th>
           <th>Preço compra</th>
           <th>Preço venda</th>
-          <th>Capital</th>
-          <th>Lucro líquido</th>
-          <th>Lucro %</th>
-          <th>Detalhes</th>
-          <th>Operação</th>
+          <th>Lucro líquido estimado</th>
+          <th>Lucro líquido %</th>
+          <th>Validação</th>
         </tr>
       </thead>
       <tbody id="opportunityTable">
-        <tr><td colspan="10">Aguardando primeira análise...</td></tr>
+        <tr><td colspan="8">Aguardando primeira análise...</td></tr>
       </tbody>
     </table>
-  </div>
-</div>
-
-<div class="panel">
-  <h2>Comparação das cinco simulações</h2>
-  <p class="panel-description" id="comparisonDescription">
-    Selecione uma oportunidade para comparar os cinco capitais em USD.
-  </p>
-  <div id="comparisonArea" class="muted">
-    Nenhuma oportunidade selecionada.
-  </div>
-  <button class="primary" id="compareButton" onclick="simulateFiveBudgets()" disabled>
-    SIMULAR OS CINCO CAPITAIS
-  </button>
-</div>
-
-<div class="panel" id="operationPanel">
-  <h2>Resultado da simulação</h2>
-  <p class="panel-description">
-    O resultado detalhado aparecerá aqui.
-  </p>
-  <div id="simulationResult" class="empty">
-    Nenhuma simulação realizada nesta sessão.
   </div>
 </div>
 
@@ -273,12 +237,7 @@ const ROUTES = {
   history: '/api/simulations'
 };
 
-const BUDGETS = [50, 100, 150, 250, 500];
-
 let latestData = null;
-let selectedOpportunity = null;
-let simulationResults = {};
-let simulationInProgress = false;
 let scanInProgress = false;
 let historyRequestRunning = false;
 let exchangeRequestRunning = false;
@@ -304,10 +263,6 @@ function firstNumber(...values) {
 
 function getCurrency() {
   return 'USD';
-}
-
-function getBudget() {
-  return numberValue(document.getElementById('budgetSelect').value);
 }
 
 function formatMoney(value, currency = getCurrency()) {
@@ -611,76 +566,6 @@ function renderSimulationResult(response, currency, budget) {
 // COMPARAÇÃO DOS CINCO CAPITAIS
 // ==========================================
 
-function renderComparison() {
-  const area = document.getElementById('comparisonArea');
-  const description = document.getElementById('comparisonDescription');
-
-  area.innerHTML = '';
-
-  if (!selectedOpportunity) {
-    area.textContent = 'Nenhuma oportunidade selecionada.';
-    description.textContent = 'Selecione uma oportunidade para comparar os cinco capitais.';
-    document.getElementById('compareButton').disabled = true;
-    return;
-  }
-
-  const currency = getCurrency();
-
-  description.textContent =
-    'Comparação em ' + currency +
-    '. Cada capital será validado individualmente pelo backend.';
-
-  const heading = document.createElement('h3');
-  heading.textContent =
-    safeText(selectedOpportunity.symbol) + ' | ' +
-    safeText(getExchangeName(selectedOpportunity, 'buy')) +
-    ' → ' +
-    safeText(getExchangeName(selectedOpportunity, 'sell'));
-
-  const grid = document.createElement('div');
-  grid.className = 'simulation-grid';
-
-  BUDGETS.forEach(budget => {
-    const simulation = getSimulation(
-      selectedOpportunity,
-      currency,
-      budget
-    );
-
-    const card = document.createElement('div');
-    card.className = 'simulation-item' +
-      (budget === getBudget() ? ' selected' : '');
-
-    const title = document.createElement('small');
-    title.textContent = formatMoney(budget, currency);
-
-    const profit = document.createElement('strong');
-    profit.textContent = simulation
-      ? formatMoney(getProfit(simulation), currency)
-      : 'Não simulado';
-
-    if (simulation) {
-      profit.className = isApproved(simulation) ? 'green' : 'yellow';
-    }
-
-    const status = document.createElement('span');
-    status.className = 'simulation-status';
-    status.textContent = simulation
-      ? formatPercent(getProfitPercent(simulation)) +
-        ' · ' + safeText(simulation.status || (
-          isApproved(simulation) ? 'Aprovada' : 'Não aprovada'
-        ))
-      : 'Aguardando simulação';
-
-    card.append(title, profit, status);
-    grid.appendChild(card);
-  });
-
-  area.append(heading, grid);
-  document.getElementById('compareButton').disabled =
-    simulationInProgress;
-}
-
 // ==========================================
 // DASHBOARD
 // ==========================================
@@ -713,19 +598,16 @@ function updateDashboard(data) {
 
 function renderOpportunities() {
   const table = document.getElementById('opportunityTable');
-  const currency = getCurrency();
-  const budget = getBudget();
+  const currencyFor = quote => quote === 'BRL' ? 'BRL' : 'USD';
 
   table.innerHTML = '';
-
   document.getElementById('budgetDescription').textContent =
-    'Capital selecionado: ' + formatMoney(budget, currency) +
-    '. Moeda: ' + currency +
-    '. As simulações consideram os dados retornados pelo backend.';
+    'Percentual calculado automaticamente por oportunidade, após taxas. ' +
+    'A validação considera livro de ofertas, liquidez e slippage.';
 
   if (!latestData) {
     table.innerHTML =
-      '<tr><td colspan="10">Aguardando análise do scanner...</td></tr>';
+      '<tr><td colspan="8">Aguardando análise do scanner...</td></tr>';
     return;
   }
 
@@ -734,54 +616,46 @@ function renderOpportunities() {
   if (!opportunities.length) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 10;
+    td.colSpan = 8;
     td.textContent = 'Nenhuma oportunidade encontrada nesta análise.';
     tr.appendChild(td);
     table.appendChild(tr);
-
     document.getElementById('bestProfit').textContent = '0%';
-    document.getElementById('bestProfitMoney').textContent =
-      formatMoney(0, currency);
-
-    selectedOpportunity = null;
-    renderComparison();
+    document.getElementById('bestProfitMoney').textContent = '-';
     return;
   }
 
-  const ranked = opportunities.map(item => ({
-    item,
-    simulation: getSimulation(item, currency, budget)
-  }));
-
-  ranked.sort((a, b) =>
-    getProfit(b.simulation) - getProfit(a.simulation)
-  );
+  const ranked = opportunities.map(item => {
+    const simulations = Array.isArray(item.simulations) ? item.simulations : [];
+    const simulation = simulations.find(value =>
+      value && value.profitPercent !== undefined
+    ) || simulations[0] || item.simulation || null;
+    const percent = simulation
+      ? getProfitPercent(simulation)
+      : firstNumber(item.estimatedNetPercent, item.netProfitPercent, item.profitPercent);
+    return { item, simulation, percent };
+  }).sort((a, b) => b.percent - a.percent);
 
   const best = ranked.find(row =>
     row.simulation && isApproved(row.simulation)
-  );
+  ) || ranked[0];
 
-  document.getElementById('bestProfit').textContent = best
-    ? formatPercent(getProfitPercent(best.simulation))
-    : '0%';
+  document.getElementById('bestProfit').textContent =
+    formatPercent(best.percent);
+  document.getElementById('bestProfitMoney').textContent =
+    best.simulation
+      ? formatMoney(getProfit(best.simulation), currencyFor(best.item.quote))
+      : 'Aguardando validação do livro';
 
-  document.getElementById('bestProfitMoney').textContent = best
-    ? formatMoney(getProfit(best.simulation), currency)
-    : formatMoney(0, currency);
-
-  ranked.forEach(({ item, simulation }) => {
+  ranked.forEach(({ item, simulation, percent }) => {
     const tr = document.createElement('tr');
-
-    const cells = [
+    [
       item.symbol,
       getExchangeName(item, 'buy'),
       getExchangeName(item, 'sell'),
       formatPrice(getBuyPrice(simulation, item)),
-      formatPrice(getSellPrice(simulation, item)),
-      formatMoney(budget, currency)
-    ];
-
-    cells.forEach(value => {
+      formatPrice(getSellPrice(simulation, item))
+    ].forEach(value => {
       const td = document.createElement('td');
       td.textContent = safeText(value);
       tr.appendChild(td);
@@ -789,76 +663,34 @@ function renderOpportunities() {
 
     const profitCell = document.createElement('td');
     const percentCell = document.createElement('td');
+    const statusCell = document.createElement('td');
 
     if (simulation) {
       const approved = isApproved(simulation);
-      profitCell.textContent = formatMoney(getProfit(simulation), currency);
-      percentCell.textContent = formatPercent(getProfitPercent(simulation));
-
+      profitCell.textContent = formatMoney(
+        getProfit(simulation),
+        currencyFor(item.quote)
+      );
+      percentCell.textContent = formatPercent(percent);
       profitCell.className = approved ? 'profit-cell' : 'loss-cell';
       percentCell.className = approved ? 'profit-cell' : 'loss-cell';
-    } else if (item.isPreliminary === true) {
-      profitCell.textContent = 'Prévia (não validada)';
-      percentCell.textContent = '-';
-      profitCell.className = 'loss-cell';
-      percentCell.className = 'loss-cell';
+      statusCell.textContent = approved
+        ? 'Validada'
+        : safeText(simulation.reason || simulation.status || 'Não aprovada');
+      statusCell.className = approved ? 'profit-cell' : 'loss-cell';
     } else {
-      profitCell.textContent = 'Não simulado';
-      percentCell.textContent = '-';
+      profitCell.textContent = '—';
+      percentCell.textContent = formatPercent(percent);
+      percentCell.className = percent > 0 ? 'profit-cell' : 'loss-cell';
+      statusCell.textContent = item.isPreliminary
+        ? 'Prévia · livro pendente'
+        : 'Aguardando validação';
+      statusCell.className = 'muted';
     }
 
-    tr.append(profitCell, percentCell);
-
-    const detailCell = document.createElement('td');
-    const detailButton = document.createElement('button');
-    detailButton.textContent = 'COMPARAR';
-
-    detailButton.onclick = () => {
-      selectedOpportunity = item;
-      renderComparison();
-
-      document.getElementById('comparisonArea').scrollIntoView({
-        behavior: 'smooth',
-        block: 'nearest'
-      });
-    };
-
-    detailCell.appendChild(detailButton);
-    tr.appendChild(detailCell);
-
-    const operationCell = document.createElement('td');
-    const simulateButton = document.createElement('button');
-
-    simulateButton.className = 'simulate';
-    // A oportunidade preliminar pode ser validada sob demanda:
-    // o endpoint /api/simulation busca preços e livros atuais
-    // nas duas corretoras antes de calcular lucro líquido.
-    simulateButton.textContent = 'CALCULAR LUCRO';
-    simulateButton.disabled = simulationInProgress;
-
-    simulateButton.onclick = async () => {
-      selectedOpportunity = item;
-      renderComparison();
-      await simulateFiveBudgets();
-    };
-
-    operationCell.appendChild(simulateButton);
-    tr.appendChild(operationCell);
-
+    tr.append(profitCell, percentCell, statusCell);
     table.appendChild(tr);
   });
-
-  if (selectedOpportunity) {
-    const current = opportunities.find(item =>
-      getOpportunityKey(item) === getOpportunityKey(selectedOpportunity)
-    );
-
-    selectedOpportunity = current || opportunities[0];
-  } else {
-    selectedOpportunity = opportunities[0];
-  }
-
-  renderComparison();
 }
 
 // ==========================================
@@ -940,149 +772,6 @@ async function scan() {
     scanInProgress = false;
     button.disabled = false;
     button.textContent = 'NOVA ANÁLISE';
-  }
-}
-
-// ==========================================
-// SIMULAÇÃO INDIVIDUAL
-// ==========================================
-
-async function requestSimulation(opportunity, budget, currency) {
-  const buyExchangeId = getExchangeId(opportunity, 'buy');
-  const sellExchangeId = getExchangeId(opportunity, 'sell');
-
-  if (!opportunity.symbol || !buyExchangeId || !sellExchangeId) {
-    throw new Error(
-      'A oportunidade não possui símbolo ou identificadores das corretoras.'
-    );
-  }
-
-  const payload = {
-    symbol: opportunity.symbol,
-    buyExchangeId,
-    sellExchangeId,
-    budget,
-    budgetCurrency: currency,
-    quoteCurrency: currency,
-    market: 'spot'
-  };
-
-  const response = await apiRequest(ROUTES.simulation, {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-
-  const simulation = normalizeSimulationResponse(response);
-
-  if (!simulation || typeof simulation !== 'object') {
-    throw new Error('O backend não retornou um resultado de simulação válido.');
-  }
-
-  simulationResults[
-    getSimulationKey(opportunity, currency, budget)
-  ] = simulation;
-
-  return simulation;
-}
-
-async function simulateFiveBudgets() {
-  if (simulationInProgress) return;
-
-  if (!selectedOpportunity) {
-    setSimulationMessage(
-      'Selecione uma oportunidade antes de simular.',
-      'error'
-    );
-    return;
-  }
-
-  simulationInProgress = true;
-
-  const currency = getCurrency();
-  const button = document.getElementById('compareButton');
-
-  button.disabled = true;
-  button.textContent = 'SIMULANDO...';
-
-  document.querySelectorAll('.simulate').forEach(element => {
-    element.disabled = true;
-  });
-
-  let completed = 0;
-  let errors = [];
-
-  setSimulationMessage(
-    'Iniciando cinco simulações em ' + currency + '...'
-  );
-
-  try {
-    // Sequencial para evitar sobrecarregar a corretora e o backend.
-    for (const budget of BUDGETS) {
-      setSimulationMessage(
-        'Simulando ' + formatMoney(budget, currency) +
-        ' (' + (completed + 1) + ' de 5)...'
-      );
-
-      try {
-        await requestSimulation(
-          selectedOpportunity,
-          budget,
-          currency
-        );
-
-        completed++;
-        renderComparison();
-      } catch (error) {
-        errors.push(formatMoney(budget, currency) + ': ' + error.message);
-      }
-    }
-
-    renderComparison();
-    renderOpportunities();
-
-    const lastSuccessful = BUDGETS
-      .slice()
-      .reverse()
-      .find(budget =>
-        getSimulation(selectedOpportunity, currency, budget)
-      );
-
-    if (lastSuccessful !== undefined) {
-      const result = getSimulation(
-        selectedOpportunity,
-        currency,
-        lastSuccessful
-      );
-
-      renderSimulationResult(result, currency, lastSuccessful);
-    }
-
-    if (errors.length) {
-      setMessage(
-        completed + ' de 5 simulações concluídas. ' +
-        errors.length + ' falharam.',
-        'error'
-      );
-
-      const errorBox = document.createElement('div');
-      errorBox.className = 'notice red';
-      errorBox.textContent = errors.join(' | ');
-      document.getElementById('simulationResult').appendChild(errorBox);
-    } else {
-      setMessage(
-        'As cinco simulações em ' + currency +
-        ' foram concluídas.',
-        'success'
-      );
-    }
-
-    await loadSimulationHistory();
-  } finally {
-    simulationInProgress = false;
-    button.disabled = !selectedOpportunity;
-    button.textContent = 'SIMULAR OS CINCO CAPITAIS';
-
-    renderOpportunities();
   }
 }
 
@@ -1282,7 +971,7 @@ async function scanDexPools(){
 // ==========================================
 document.getElementById('budgetSelect').addEventListener('change', () => {
   renderOpportunities();
-  renderComparison();
+
 });
 
 // ==========================================
