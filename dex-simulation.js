@@ -199,7 +199,7 @@ async function discoverDexOpportunities() {
     for (const query of ['USDC', 'USDT']) {
       try {
         const data = await fetchJson(
-          'https://api.dexscreener.com/latest/dex/search/?q=' + encodeURIComponent(query),
+          'https://api.dexscreener.com/latest/dex/search?q=' + encodeURIComponent(query),
           { headers: { accept: 'application/json' } }, 9000
         );
         if (Array.isArray(data.pairs)) searchResults.push(...data.pairs);
