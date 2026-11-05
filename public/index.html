@@ -830,11 +830,11 @@ function renderOpportunities() {
     const simulateButton = document.createElement('button');
 
     simulateButton.className = 'simulate';
-    simulateButton.textContent = item.isPreliminary === true
-      ? 'AGUARDANDO VALIDAÇÃO'
-      : 'SIMULAR 5 CAPITAIS';
-    simulateButton.disabled =
-      simulationInProgress || item.isPreliminary === true;
+    // A oportunidade preliminar pode ser validada sob demanda:
+    // o endpoint /api/simulation busca preços e livros atuais
+    // nas duas corretoras antes de calcular lucro líquido.
+    simulateButton.textContent = 'CALCULAR LUCRO';
+    simulateButton.disabled = simulationInProgress;
 
     simulateButton.onclick = async () => {
       selectedOpportunity = item;
