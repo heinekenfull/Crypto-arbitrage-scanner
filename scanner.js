@@ -1091,7 +1091,7 @@ async function scanMarket(onProgress = null) {
       const preliminary = {
         success: true,
         market: 'spot',
-        version: '6.3.6',
+        version: '6.3.7',
         phase: 'validating',
         isPreliminary: true,
         timestamp: Date.now(),
@@ -1158,6 +1158,73 @@ async function scanMarket(onProgress = null) {
 
     const evaluated = [];
 
+    function publishValidationProgress() {
+      if (typeof onProgress !== 'function') return;
+
+      const progressOpportunities = selectedCandidates.map(candidate => {
+        const completed = evaluated.find(item =>
+          item &&
+          item.symbol === candidate.symbol &&
+          item.buyExchangeId === candidate.buyExchangeId &&
+          item.sellExchangeId === candidate.sellExchangeId
+        );
+
+        return completed || {
+          ...candidate,
+          status: 'validating',
+          validationStatus: 'validating',
+          isPreliminary: true,
+          simulations: [],
+          validatedBudgets: [],
+          validatedBudgetsUSD: [],
+          validatedBudgetsBRL: []
+        };
+      });
+
+      const checked = evaluated.length;
+      const validated = evaluated.filter(item =>
+        item?.status === 'validated'
+      ).length;
+      const rejectedCount = evaluated.filter(item =>
+        item?.validationError || item?.status === 'not_validated'
+      ).length;
+
+      try {
+        onProgress({
+          success: true,
+          market: 'spot',
+          version: '6.3.7',
+          phase: checked >= selectedCandidates.length ? 'complete' : 'validating',
+          isPreliminary: checked < selectedCandidates.length,
+          timestamp: Date.now(),
+          lastUpdated: Date.now(),
+          exchanges: exchangeResults,
+          exchangesConnected: exchangeResults.filter(item => item.connected).length,
+          marketsAnalyzed,
+          candidatesFound: candidates.length,
+          candidatesValidated: checked,
+          validatedOpportunities: validated,
+          opportunities: progressOpportunities,
+          diagnostics: {
+            phase: checked >= selectedCandidates.length ? 'complete' : 'validating',
+            enabledExchanges: exchangeIds.length,
+            connectedExchanges: exchangeResults.filter(item => item.connected).length,
+            candidateCount: selectedCandidates.length,
+            candidatesChecked: checked,
+            candidatesRemaining: Math.max(0, selectedCandidates.length - checked),
+            validationErrors: rejectedCount,
+            validationConcurrency: VALIDATION_CONCURRENCY,
+            budgetsUSD: BUDGETS_USD,
+            budgetsBRL: [],
+            simulationsPerOpportunity: BUDGETS_USD.length
+          },
+          durationMs: Date.now() - startedAt
+        });
+      } catch (progressError) {
+        console.warn('[SCAN] Falha ao publicar progresso:', progressError.message);
+      }
+    }
+
     for (const group of candidateGroups.values()) {
       const groupStartedAt = Date.now();
       console.log(
@@ -1187,6 +1254,7 @@ async function scanMarket(onProgress = null) {
               conversionGraph,
               pairInstances
             ));
+            publishValidationProgress();
           } catch (error) {
             const validationError = error.message || String(error);
             evaluated.push({
@@ -1213,16 +1281,29 @@ async function scanMarket(onProgress = null) {
               validatedBudgetsUSD: [],
               validatedBudgetsBRL: []
             });
+            publishValidationProgress();
           }
         }
       } catch (error) {
         for (const opportunity of group) {
           evaluated.push({
-            error: error.message || String(error),
+            validationError: 'Falha ao abrir corretora para consultar o livro: ' +
+              (error.message || String(error)),
             symbol: opportunity.symbol,
             buyExchangeId: opportunity.buyExchangeId,
-            sellExchangeId: opportunity.sellExchangeId
+            sellExchangeId: opportunity.sellExchangeId,
+            status: 'not_validated',
+            orderBookValidation: {
+              valid: false,
+              synchronized: false,
+              reason: error.message || String(error)
+            },
+            simulations: [],
+            validatedBudgets: [],
+            validatedBudgetsUSD: [],
+            validatedBudgetsBRL: []
           });
+          publishValidationProgress();
         }
       } finally {
         await closeExchangeMap(pairInstances);
@@ -1269,7 +1350,7 @@ async function scanMarket(onProgress = null) {
     return {
       success: true,
       market: 'spot',
-      version: '6.3.6',
+      version: '6.3.7',
       phase: 'complete',
       isPreliminary: false,
 
