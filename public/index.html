@@ -209,7 +209,7 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
 </div>
 
 <footer>
-CRYPTO ARBITRAGE SCANNER 6.3.5 · SPOT
+CRYPTO ARBITRAGE SCANNER 6.3.7 · SPOT
 <br><br>
 Modo de simulação. Nenhuma ordem real é executada.
 <br>
@@ -655,9 +655,21 @@ function renderOpportunities() {
   };
 
   table.innerHTML = '';
-  document.getElementById('budgetDescription').textContent =
-    'Percentual calculado automaticamente por oportunidade, após taxas. ' +
-    'A validação considera livro de ofertas, liquidez e slippage.';
+  const diagnostics = latestData?.diagnostics || {};
+  if (latestData?.phase === 'validating') {
+    const checked = numberValue(diagnostics.candidatesChecked ??
+      latestData.candidatesValidated);
+    const total = numberValue(diagnostics.candidateCount ??
+      latestData.candidatesFound);
+    document.getElementById('budgetDescription').textContent =
+      'Validando livros de ofertas: ' + checked + ' de ' + total +
+      ' oportunidades analisadas. A validação considera atualização, ' +
+      'sincronização, liquidez, taxas e slippage.';
+  } else {
+    document.getElementById('budgetDescription').textContent =
+      'Percentual calculado automaticamente por oportunidade, após taxas. ' +
+      'A validação considera livro de ofertas, liquidez e slippage.';
+  }
 
   if (!latestData) {
     table.innerHTML =
@@ -747,10 +759,26 @@ function renderOpportunities() {
         estimateCell.textContent = formatMoney(profitFor20(null, percent), 'USD') + ' USDT';
         estimateCell.className = percent > 0 ? 'profit-cell' : 'loss-cell';
         percentCell.className = percent > 0 ? 'profit-cell' : 'loss-cell';
-        statusCell.textContent = item.isPreliminary
-          ? 'Prévia · livro pendente'
-          : 'Aguardando validação';
-        statusCell.className = 'muted';
+        if (item.status === 'validating' || item.isPreliminary) {
+          const checked = numberValue(
+            latestData?.diagnostics?.candidatesChecked ??
+            latestData?.candidatesValidated
+          );
+          const total = numberValue(
+            latestData?.diagnostics?.candidateCount ??
+            latestData?.candidatesFound
+          );
+          statusCell.textContent = total
+            ? 'Validando livros · ' + checked + '/' + total
+            : 'Validando livros...';
+          statusCell.className = 'muted';
+        } else if (item.orderBookValidation?.valid === true) {
+          statusCell.textContent = 'Livro validado · simulação indisponível';
+          statusCell.className = 'muted';
+        } else {
+          statusCell.textContent = 'Aguardando resultado da validação';
+          statusCell.className = 'muted';
+        }
       }
     }
 
