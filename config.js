@@ -30,6 +30,7 @@ module.exports = {
 
   SIMULATION: {
     DEFAULT_TRADE_BUDGET_USD: 20,
+    TRADE_BUDGETS_USD: [20],
 
     // Capital interno de referência para medir liquidez e slippage.
     // Não há seleção ou comparação de capitais na interface.
