@@ -703,34 +703,25 @@ async function fetchOrderBook(exchange, symbol) {
   }
 
   const depth = SIM.ORDERBOOK_DEPTH || undefined;
-  let timer = null;
 
-  try {
-    const orderBook = await Promise.race([
-      exchange.fetchOrderBook(symbol, depth),
-      new Promise((resolve, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(
-            'Tempo limite ao consultar livro de ofertas: ' +
-            exchange.id + ' ' + symbol
-          ));
-        }, ORDERBOOK_REQUEST_TIMEOUT_MS);
+  // O CCXT aplica este timeout na requisição HTTP real. Evita Promise.race,
+  // que apenas encerrava a espera local e podia deixar a chamada original ativa.
+  const configuredTimeout = number(exchange.timeout, ORDERBOOK_REQUEST_TIMEOUT_MS);
+  exchange.timeout = Math.min(
+    configuredTimeout > 0 ? configuredTimeout : ORDERBOOK_REQUEST_TIMEOUT_MS,
+    ORDERBOOK_REQUEST_TIMEOUT_MS
+  );
 
-        if (typeof timer.unref === 'function') timer.unref();
-      })
-    ]);
+  const orderBook = await exchange.fetchOrderBook(symbol, depth);
 
-    if (!orderBook || typeof orderBook !== 'object') {
-      throw new Error('A corretora retornou um livro de ofertas inválido.');
-    }
-
-    return {
-      ...orderBook,
-      _receivedAt: Date.now()
-    };
-  } finally {
-    if (timer) clearTimeout(timer);
+  if (!orderBook || typeof orderBook !== 'object') {
+    throw new Error('A corretora retornou um livro de ofertas inválido.');
   }
+
+  return {
+    ...orderBook,
+    _receivedAt: Date.now()
+  };
 }
 
 // ==========================================
@@ -845,10 +836,23 @@ async function evaluateCandidate(
     );
   }
 
-  const [buyOrderBook, sellOrderBook] = await Promise.all([
+  // Aguarda as duas consultas terminarem, mesmo se uma falhar.
+  // Assim o fechamento das instâncias não interrompe uma chamada ainda pendente.
+  const bookResults = await Promise.allSettled([
     fetchOrderBook(buyExchange, opportunity.symbol),
     fetchOrderBook(sellExchange, opportunity.symbol)
   ]);
+
+  if (bookResults[0].status === 'rejected') {
+    throw new Error('Compra: ' + (bookResults[0].reason?.message || String(bookResults[0].reason)));
+  }
+
+  if (bookResults[1].status === 'rejected') {
+    throw new Error('Venda: ' + (bookResults[1].reason?.message || String(bookResults[1].reason)));
+  }
+
+  const buyOrderBook = bookResults[0].value;
+  const sellOrderBook = bookResults[1].value;
 
   const buyValidation = validateOrderBook(buyOrderBook);
   const sellValidation = validateOrderBook(sellOrderBook);
@@ -1087,7 +1091,7 @@ async function scanMarket(onProgress = null) {
       const preliminary = {
         success: true,
         market: 'spot',
-        version: '6.3.5',
+        version: '6.3.6',
         phase: 'validating',
         isPreliminary: true,
         timestamp: Date.now(),
@@ -1265,7 +1269,7 @@ async function scanMarket(onProgress = null) {
     return {
       success: true,
       market: 'spot',
-      version: '6.3.5',
+      version: '6.3.6',
       phase: 'complete',
       isPreliminary: false,
 
