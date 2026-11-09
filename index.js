@@ -33,10 +33,10 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.3.4';
+const VERSION = '6.3.5';
 const ALLOWED_CURRENCIES = ['USD'];
 
-const ALLOWED_BUDGETS = [50, 100, 150, 250, 500];
+const ALLOWED_BUDGETS = [20];
 
 const SIM = config.SIMULATION || {};
 
