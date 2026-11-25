@@ -1369,7 +1369,7 @@ async function scanMarket(onProgress = null) {
 
       marketsAnalyzed,
 
-      candidatesFound: candidates.length,
+      candidatesFound: totalCandidatesFound,
       candidatesValidated: selectedCandidates.length,
       validatedOpportunities: validatedCount,
 
