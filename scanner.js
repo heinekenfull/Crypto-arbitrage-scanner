@@ -12,6 +12,8 @@ const {
   simulateBudget
 } = require('./simulation');
 
+const { getOkxOrderBook } = require('./okx-ws-orderbook');
+
 // ==========================================
 // CRYPTO ARBITRAGE SCANNER 6.3.4
 // SPOT — SIMULAÇÃO USD / BRL
@@ -708,6 +710,31 @@ function isTransientOrderBookError(error) {
 }
 
 async function fetchOrderBook(exchange, symbol) {
+  // Feed pública WebSocket da OKX: usa o snapshot mais recente do livro
+  // e mantém REST como fallback obrigatório em falhas/desconexões.
+  if (
+    String(exchange?.id || '').toLowerCase() === 'okx' &&
+    config.OKX_ORDERBOOK_WS_ENABLED !== false
+  ) {
+    try {
+      const wsBook = await getOkxOrderBook(
+        symbol,
+        Math.min(2500, ORDERBOOK_REQUEST_TIMEOUT_MS)
+      );
+      if (wsBook && Array.isArray(wsBook.bids) && Array.isArray(wsBook.asks)) {
+        console.log('[ORDERBOOK] OKX ' + symbol + ' via WebSocket.');
+        return wsBook;
+      }
+    } catch (wsError) {
+      console.warn('[ORDERBOOK] OKX WS indisponível para ' + symbol +
+        '; fallback REST: ' + (wsError.message || String(wsError)));
+    }
+  }
+
+  return fetchOrderBookRest(exchange, symbol);
+}
+
+async function fetchOrderBookRest(exchange, symbol) {
   if (!exchange || typeof exchange.fetchOrderBook !== 'function') {
     throw new Error('Corretora não oferece livro de ofertas.');
   }
