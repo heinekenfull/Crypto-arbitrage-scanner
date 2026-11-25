@@ -191,6 +191,8 @@ footer{text-align:center;padding:25px;color:#718096;font-size:12px}
   <div class="exchange-list" id="exchangeList">
     Carregando corretoras...
   </div>
+  <button class="secondary" id="testExchangeBooks" onclick="testExchangeBooks()">TESTAR LIVROS DE TODAS AS CORRETORAS</button>
+  <p class="info-line" id="bookTestMessage">Teste manual de livros ainda não executado.</p>
 </div>
 
 <div class="panel">
@@ -936,6 +938,19 @@ async function loadSimulationHistory() {
 // ==========================================
 // CORRETORAS
 // ==========================================
+
+async function testExchangeBooks() {
+  const button = document.getElementById('testExchangeBooks'), message = document.getElementById('bookTestMessage');
+  button.disabled = true; button.textContent = 'TESTANDO LIVROS...';
+  message.textContent = 'Teste iniciado, uma corretora por vez para proteger a memória.';
+  try {
+    const result = await apiRequest('/api/exchanges/test-books', { method: 'POST' });
+    const ok = (result.results || []).filter(item => item.status === 'ok').length;
+    message.textContent = 'Teste concluído: ' + ok + '/' + (result.tested || 0) + ' livros responderam.';
+    await loadExchanges();
+  } catch (error) { message.textContent = 'Falha no teste: ' + error.message; }
+  finally { button.disabled = false; button.textContent = 'TESTAR LIVROS DE TODAS AS CORRETORAS'; }
+}
 
 async function loadExchanges() {
   if (exchangeRequestRunning) return;
