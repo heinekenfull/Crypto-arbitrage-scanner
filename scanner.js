@@ -624,7 +624,12 @@ function calculateOpportunities(priceCollections) {
     }
   }
 
+  // Limita a memória usada por candidatas; mantém as melhores por spread líquido.
+  // Sem limite, cada símbolo pode gerar muitas combinações entre exchanges.
+  const MAX_RETAINED_CANDIDATES = 350;
+  const TRIM_AT_CANDIDATES = 700;
   const opportunities = [];
+  let totalCandidates = 0;
 
   for (const [symbol, entries] of markets.entries()) {
     if (entries.length < 2) continue;
@@ -655,6 +660,7 @@ function calculateOpportunities(priceCollections) {
 
         if (estimatedNetPercent < MIN_PROFIT_PERCENT) continue;
 
+        totalCandidates += 1;
         opportunities.push({
           symbol,
           base: buy.base,
@@ -684,6 +690,10 @@ function calculateOpportunities(priceCollections) {
           validatedBudgetsUSD: [],
           validatedBudgetsBRL: []
         });
+        if (opportunities.length >= TRIM_AT_CANDIDATES) {
+          opportunities.sort((a, b) => b.estimatedNetPercent - a.estimatedNetPercent);
+          opportunities.length = MAX_RETAINED_CANDIDATES;
+        }
       }
     }
   }
@@ -691,7 +701,9 @@ function calculateOpportunities(priceCollections) {
   opportunities.sort(
     (a, b) => b.estimatedNetPercent - a.estimatedNetPercent
   );
-
+  opportunities.length = Math.min(opportunities.length, MAX_RETAINED_CANDIDATES);
+  // Count total candidates for dashboard diagnostics without retaining every object.
+  opportunities.totalFound = totalCandidates;
   return opportunities;
 }
 
@@ -1151,6 +1163,7 @@ async function scanMarket(onProgress = null) {
     const candidates = calculateOpportunities(
       priceCollections
     );
+    const totalCandidatesFound = number(candidates.totalFound, candidates.length);
 
     const selectedCandidates = candidates.slice(
       0,
@@ -1174,7 +1187,7 @@ async function scanMarket(onProgress = null) {
           item => item.connected
         ).length,
         marketsAnalyzed,
-        candidatesFound: candidates.length,
+        candidatesFound: totalCandidatesFound,
         candidatesValidated: 0,
         validatedOpportunities: 0,
         opportunities: selectedCandidates.map(item => ({
@@ -1192,7 +1205,7 @@ async function scanMarket(onProgress = null) {
           connectedExchanges: exchangeResults.filter(
             item => item.connected
           ).length,
-          candidateCount: candidates.length,
+          candidateCount: totalCandidatesFound,
           candidatesChecked: 0,
           validationErrors: 0,
           validationConcurrency: VALIDATION_CONCURRENCY,
@@ -1368,7 +1381,7 @@ async function scanMarket(onProgress = null) {
           item => item.connected
         ).length,
 
-        candidateCount: candidates.length,
+        candidateCount: totalCandidatesFound,
         candidatesChecked: selectedCandidates.length,
 
         validationErrors: rejected.length,
