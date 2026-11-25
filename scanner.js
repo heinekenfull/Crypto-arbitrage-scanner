@@ -697,31 +697,58 @@ function calculateOpportunities(priceCollections) {
 // LIVRO DE OFERTAS
 // ==========================================
 
+const orderBookExchangeCooldown = new Map();
+const ORDERBOOK_NETWORK_COOLDOWN_MS = 45000;
+const ORDERBOOK_RETRY_DELAY_MS = 700;
+
+function isTransientOrderBookError(error) {
+  const details = [error?.message, error?.stack, error?.cause?.message, error?.cause?.stack]
+    .filter(Boolean).join(' ').toLowerCase();
+  return /etimedout|econnreset|econnrefused|ehostunreach|enotfound|fetch failed|networkerror|requesttimeout|exchange not available|socket hang up/.test(details);
+}
+
 async function fetchOrderBook(exchange, symbol) {
   if (!exchange || typeof exchange.fetchOrderBook !== 'function') {
     throw new Error('Corretora não oferece livro de ofertas.');
   }
 
-  const depth = SIM.ORDERBOOK_DEPTH || undefined;
+  const exchangeId = String(exchange.id || 'unknown').toLowerCase();
+  const cooldownUntil = orderBookExchangeCooldown.get(exchangeId) || 0;
+  if (cooldownUntil > Date.now()) {
+    throw new Error('Livro temporariamente suspenso para ' + exchangeId + ' após falha de rede; nova tentativa no próximo ciclo.');
+  }
+  if (cooldownUntil) orderBookExchangeCooldown.delete(exchangeId);
 
-  // O CCXT aplica este timeout na requisição HTTP real. Evita Promise.race,
-  // que apenas encerrava a espera local e podia deixar a chamada original ativa.
+  const depth = SIM.ORDERBOOK_DEPTH || undefined;
   const configuredTimeout = number(exchange.timeout, ORDERBOOK_REQUEST_TIMEOUT_MS);
   exchange.timeout = Math.min(
     configuredTimeout > 0 ? configuredTimeout : ORDERBOOK_REQUEST_TIMEOUT_MS,
     ORDERBOOK_REQUEST_TIMEOUT_MS
   );
 
-  const orderBook = await exchange.fetchOrderBook(symbol, depth);
-
-  if (!orderBook || typeof orderBook !== 'object') {
-    throw new Error('A corretora retornou um livro de ofertas inválido.');
+  // Uma repetição curta corrige falhas transitórias. Se a rede continuar
+  // indisponível, o cooldown impede que cada candidata repita o timeout,
+  // evitando fila de sockets, scans longos e pressão adicional de memória.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const orderBook = await exchange.fetchOrderBook(symbol, depth);
+      if (!orderBook || typeof orderBook !== 'object') {
+        throw new Error('A corretora retornou um livro de ofertas inválido.');
+      }
+      return { ...orderBook, _receivedAt: Date.now() };
+    } catch (error) {
+      if (!isTransientOrderBookError(error)) throw error;
+      if (attempt === 0) {
+        console.warn('[ORDERBOOK] Falha transitória em ' + exchangeId + ' ' + symbol + '; repetindo uma vez.');
+        await new Promise(resolve => setTimeout(resolve, ORDERBOOK_RETRY_DELAY_MS));
+        continue;
+      }
+      orderBookExchangeCooldown.set(exchangeId, Date.now() + ORDERBOOK_NETWORK_COOLDOWN_MS);
+      console.warn('[ORDERBOOK] ' + exchangeId + ' entrou em cooldown por ' + ORDERBOOK_NETWORK_COOLDOWN_MS + 'ms após falha de rede.');
+      throw error;
+    }
   }
-
-  return {
-    ...orderBook,
-    _receivedAt: Date.now()
-  };
+  throw new Error('Não foi possível consultar o livro de ofertas.');
 }
 
 // ==========================================
