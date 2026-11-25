@@ -643,6 +643,46 @@ app.get('/api/config', (req, res) => {
 // ==========================================
 
 
+const lastManualBookTests = new Map();
+let manualBookTestRunning = false;
+
+app.post('/api/exchanges/test-books', async (req, res) => {
+  if (manualBookTestRunning) return res.status(409).json({ success: false, error: 'Teste de livros já está em andamento.' });
+  manualBookTestRunning = true;
+  const results = [];
+  try {
+    for (const exchangeId of getEnabledExchangeIds()) {
+      let exchange;
+      const startedAt = Date.now();
+      try {
+        exchange = createExchange(exchangeId);
+        exchange.timeout = Math.min(Number(config.REQUEST_TIMEOUT || 8000), 8000);
+        const markets = await exchange.loadMarkets();
+        const symbol = ['BTC/USDT', 'ETH/USDT', 'BTC/USD'].find(candidate => markets?.[candidate]);
+        if (!symbol) throw new Error('Nenhum par de teste BTC/USDT, ETH/USDT ou BTC/USD disponível.');
+        let book, source = 'REST';
+        if (exchangeId === 'okx' && config.OKX_ORDERBOOK_WS_ENABLED !== false) {
+          try {
+            const { getOkxOrderBook } = require('./okx-ws-orderbook');
+            book = await getOkxOrderBook(symbol, 2200);
+            source = 'WebSocket OKX';
+          } catch (_) {
+            book = await exchange.fetchOrderBook(symbol, 5);
+            source = 'REST fallback';
+          }
+        } else book = await exchange.fetchOrderBook(symbol, 5);
+        if (!book || !Array.isArray(book.bids) || !book.bids.length || !Array.isArray(book.asks) || !book.asks.length) throw new Error('Resposta sem bids/asks válidos.');
+        const result = { id: exchangeId, status: 'ok', symbol, source, latencyMs: Date.now() - startedAt, bids: book.bids.length, asks: book.asks.length, testedAt: new Date().toISOString() };
+        lastManualBookTests.set(exchangeId, result); results.push(result);
+      } catch (error) {
+        const result = { id: exchangeId, status: 'error', error: error.message || String(error), latencyMs: Date.now() - startedAt, testedAt: new Date().toISOString() };
+        lastManualBookTests.set(exchangeId, result); results.push(result);
+      } finally { if (exchange) await closeExchange(exchange); }
+    }
+    res.json({ success: true, tested: results.length, results });
+  } finally { manualBookTestRunning = false; }
+});
+
 app.get('/api/exchanges', (req, res) => {
   const supported = getSupportedExchanges() || [];
   const enabled = getEnabledExchangeIds();
@@ -701,8 +741,9 @@ app.get('/api/exchanges', (req, res) => {
         !scan ? 'not_checked' :
         tickerConnected ? 'connected' : 'error',
       tickerError: scan?.error || null,
-      bookStatus,
-      booksChecked: books.checked,
+      bookStatus: lastManualBookTests.has(key) ? (lastManualBookTests.get(key).status === 'ok' ? 'ok' : 'rejected') : bookStatus,
+      bookTest: lastManualBookTests.get(key) || null,
+      booksChecked: books.checked + (lastManualBookTests.has(key) ? 1 : 0),
       booksValid: books.valid,
       booksRejected: books.rejected,
       lastScanAt
