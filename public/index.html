@@ -941,72 +941,66 @@ async function loadExchanges() {
   if (exchangeRequestRunning) return;
 
   exchangeRequestRunning = true;
-
   const container = document.getElementById('exchangeList');
   container.textContent = 'Consultando corretoras...';
 
   try {
     const data = await apiRequest(ROUTES.exchanges);
     const exchanges = data.exchanges || data.data?.exchanges || [];
-
     container.innerHTML = '';
 
     if (!exchanges.length) {
-      container.textContent =
-        'O servidor não retornou a lista de corretoras.';
+      container.textContent = 'O servidor não retornou a lista de corretoras.';
       return;
     }
 
     exchanges.forEach(exchange => {
       const item = document.createElement('div');
       item.className = 'exchange';
+      const ticker = exchange.tickerStatus || exchange.status || 'not_checked';
+      const tickerOk = ticker === 'connected';
+      const enabled = exchange.enabled !== false;
 
       const dot = document.createElement('span');
-      dot.className = 'dot';
-
-      if (exchange.enabled === false) {
-        dot.classList.add('muted');
-        dot.textContent = '○';
-      } else if (exchange.connected === true ||
-                 exchange.status === 'connected') {
-        dot.classList.add('green');
-        dot.textContent = '●';
-      } else {
-        dot.classList.add('yellow');
-        dot.textContent = '●';
-      }
-
+      dot.className = 'dot ' + (!enabled ? 'muted' : tickerOk ? 'green' : ticker === 'error' ? 'red' : 'yellow');
+      dot.textContent = !enabled ? '○' : tickerOk ? '●' : '●';
       item.appendChild(dot);
-      item.appendChild(
-        document.createTextNode(exchange.name || exchange.id || 'Corretora')
-      );
+      item.appendChild(document.createTextNode(exchange.name || exchange.id || 'Corretora'));
 
       const details = document.createElement('div');
       details.className = 'simulation-status';
-
-      details.textContent = exchange.enabled === false
-        ? 'Desativada'
-        : exchange.connected
-          ? 'Conectada'
-          : exchange.status || 'Status não confirmado';
-
+      if (!enabled) {
+        details.textContent = 'Desativada';
+      } else if (ticker === 'not_checked') {
+        details.textContent = 'Aguardando teste de ticker';
+      } else if (ticker === 'error') {
+        details.textContent = 'Ticker falhou: ' + (exchange.tickerError || 'erro sem detalhe');
+      } else {
+        const book = exchange.bookStatus || 'not_checked';
+        const bookText = book === 'ok' ? 'Livro OK (' + exchange.booksValid + ')' :
+          book === 'rejected' ? 'Livro rejeitado/instável (' + exchange.booksRejected + ')' :
+          'Livro ainda não testado';
+        details.textContent = 'Ticker conectado · ' + bookText;
+        if (exchange.booksChecked > 0) {
+          details.title = 'Livros verificados: ' + exchange.booksChecked +
+            '; aprovados: ' + exchange.booksValid +
+            '; rejeitados: ' + exchange.booksRejected;
+        }
+      }
+      if (exchange.tickerError) details.title = exchange.tickerError;
       item.appendChild(details);
       container.appendChild(item);
     });
 
     document.getElementById('exchangeCount').textContent =
-      exchanges.filter(exchange =>
-        exchange.connected === true ||
-        exchange.status === 'connected'
-      ).length;
+      exchanges.filter(exchange => exchange.tickerStatus === 'connected' ||
+        exchange.connected === true).length;
   } catch (error) {
-    container.textContent =
-      'Erro ao carregar corretoras: ' + error.message;
+    container.textContent = 'Erro ao carregar corretoras: ' + error.message;
   } finally {
     exchangeRequestRunning = false;
   }
 }
-
 
 // ==========================================
 
