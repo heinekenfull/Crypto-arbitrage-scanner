@@ -9,7 +9,7 @@ module.exports = {
   // WebSocket público da OKX para livros; REST continua como fallback.
   OKX_ORDERBOOK_WS_ENABLED: process.env.OKX_ORDERBOOK_WS_ENABLED !== 'false',
 
-  MAX_MARKETS_PER_EXCHANGE: 220,
+  MAX_MARKETS_PER_EXCHANGE: 160,
   EXCHANGE_SCAN_CONCURRENCY: 1,
 
   // Somente corretoras suportadas e habilitadas para o scanner SPOT.
