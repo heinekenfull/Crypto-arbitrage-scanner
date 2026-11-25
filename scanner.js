@@ -709,6 +709,25 @@ function isTransientOrderBookError(error) {
   return /etimedout|econnreset|econnrefused|ehostunreach|enotfound|fetch failed|networkerror|requesttimeout|exchange not available|socket hang up/.test(details);
 }
 
+// CCXT valida o argumento "limit" conforme cada exchange.
+ // Não passar o valor genérico da profundidade interna (12): várias APIs
+ // aceitam apenas uma lista específica de limites.
+function getOrderBookLimit(exchangeId) {
+  const limits = {
+    okx: 5,
+    kraken: 10,
+    kucoin: 20,
+    mexc: 20,
+    bitget: 15,
+    htx: 10,
+    bingx: 20
+  };
+  const key = String(exchangeId || '').toLowerCase();
+  return Object.prototype.hasOwnProperty.call(limits, key)
+    ? limits[key]
+    : undefined;
+}
+
 async function fetchOrderBook(exchange, symbol) {
   // Feed pública WebSocket da OKX: usa o snapshot mais recente do livro
   // e mantém REST como fallback obrigatório em falhas/desconexões.
@@ -746,7 +765,7 @@ async function fetchOrderBookRest(exchange, symbol) {
   }
   if (cooldownUntil) orderBookExchangeCooldown.delete(exchangeId);
 
-  const depth = SIM.ORDERBOOK_DEPTH || undefined;
+  const depth = getOrderBookLimit(exchangeId);
   const configuredTimeout = number(exchange.timeout, ORDERBOOK_REQUEST_TIMEOUT_MS);
   exchange.timeout = Math.min(
     configuredTimeout > 0 ? configuredTimeout : ORDERBOOK_REQUEST_TIMEOUT_MS,
@@ -1384,5 +1403,6 @@ module.exports = {
   findUSDToBRL,
 
   calculateOpportunities,
-  evaluateCandidate
+  evaluateCandidate,
+  getOrderBookLimit
 };

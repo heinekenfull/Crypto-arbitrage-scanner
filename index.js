@@ -13,7 +13,8 @@ const {
   fetchExchangePrices,
   mapWithConcurrency,
   buildConversionGraph,
-  evaluateCandidate
+  evaluateCandidate,
+  getOrderBookLimit
 } = require('./scanner');
 
 const {
@@ -667,10 +668,10 @@ app.post('/api/exchanges/test-books', async (req, res) => {
             book = await getOkxOrderBook(symbol, 2200);
             source = 'WebSocket OKX';
           } catch (_) {
-            book = await exchange.fetchOrderBook(symbol, 5);
+            book = await exchange.fetchOrderBook(symbol, getOrderBookLimit(exchangeId));
             source = 'REST fallback';
           }
-        } else book = await exchange.fetchOrderBook(symbol, 5);
+        } else book = await exchange.fetchOrderBook(symbol, getOrderBookLimit(exchangeId));
         if (!book || !Array.isArray(book.bids) || !book.bids.length || !Array.isArray(book.asks) || !book.asks.length) throw new Error('Resposta sem bids/asks válidos.');
         const result = { id: exchangeId, status: 'ok', symbol, source, latencyMs: Date.now() - startedAt, bids: book.bids.length, asks: book.asks.length, testedAt: new Date().toISOString() };
         lastManualBookTests.set(exchangeId, result); results.push(result);
