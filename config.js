@@ -6,6 +6,8 @@ module.exports = {
 
   SCAN_INTERVAL: 45000,
   REQUEST_TIMEOUT: 10000,
+  // WebSocket público da OKX para livros; REST continua como fallback.
+  OKX_ORDERBOOK_WS_ENABLED: process.env.OKX_ORDERBOOK_WS_ENABLED !== 'false',
 
   MAX_MARKETS_PER_EXCHANGE: 220,
   EXCHANGE_SCAN_CONCURRENCY: 1,
