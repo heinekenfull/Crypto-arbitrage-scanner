@@ -13,6 +13,7 @@ module.exports = {
   // Somente corretoras suportadas e habilitadas para o scanner SPOT.
   EXCHANGES: {
     okx: { enabled: true, name: 'OKX' },
+    kraken: { enabled: true, name: 'Kraken' },
     kucoin: { enabled: true, name: 'KuCoin' },
     mexc: { enabled: true, name: 'MEXC' },
     bitget: { enabled: true, name: 'Bitget' },
