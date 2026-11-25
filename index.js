@@ -646,22 +646,75 @@ app.get('/api/config', (req, res) => {
 app.get('/api/exchanges', (req, res) => {
   const supported = getSupportedExchanges() || [];
   const enabled = getEnabledExchangeIds();
+  const scanExchanges = lastScanResult?.exchanges || [];
+  const scanById = new Map(scanExchanges.map(item => [
+    String(item.id || item.exchangeId || '').toLowerCase(), item
+  ]));
+
+  // O resultado de tickers confirma conectividade de mercado.
+  // Livros só são considerados verificados quando algum candidato
+  // dessa corretora passou pela etapa de validação de orderbook.
+  const bookStats = new Map();
+  for (const opportunity of lastScanResult?.opportunities || []) {
+    const validation = opportunity.orderBookValidation;
+    if (!validation) continue;
+    for (const id of [
+      opportunity.buyExchangeId || opportunity.buyExchange,
+      opportunity.sellExchangeId || opportunity.sellExchange
+    ]) {
+      const key = String(id || '').toLowerCase();
+      if (!key) continue;
+      const stats = bookStats.get(key) || { checked: 0, valid: 0, rejected: 0 };
+      stats.checked += 1;
+      if (validation.valid === true && validation.synchronized === true) stats.valid += 1;
+      else stats.rejected += 1;
+      bookStats.set(key, stats);
+    }
+  }
 
   const exchanges = supported.map(item => {
     const id = normalizeExchangeId(item);
+    const key = String(id || '').toLowerCase();
+    const scan = scanById.get(key);
+    const books = bookStats.get(key) || { checked: 0, valid: 0, rejected: 0 };
+    const enabledNow = enabled.includes(id);
+    const tickerConnected = scan?.connected === true ||
+      scan?.status === 'connected';
+
+    let bookStatus = 'not_checked';
+    if (books.checked > 0) {
+      bookStatus = books.rejected > 0 ? 'rejected' :
+        books.valid > 0 ? 'ok' : 'not_checked';
+    }
 
     return {
       id,
       name: item?.name || id,
-      enabled: enabled.includes(id),
-      market: 'spot'
+      enabled: enabledNow,
+      supported: item?.supported === true,
+      market: 'spot',
+      connected: tickerConnected,
+      tickerStatus: !enabledNow ? 'disabled' :
+        !scan ? 'not_checked' :
+        tickerConnected ? 'connected' : 'error',
+      status: !enabledNow ? 'disabled' :
+        !scan ? 'not_checked' :
+        tickerConnected ? 'connected' : 'error',
+      tickerError: scan?.error || null,
+      bookStatus,
+      booksChecked: books.checked,
+      booksValid: books.valid,
+      booksRejected: books.rejected,
+      lastScanAt
     };
   });
 
   res.json({
     success: true,
     exchanges,
-    total: exchanges.length
+    total: exchanges.length,
+    lastScanAt,
+    scanPhase: lastScanResult?.phase || 'not_started'
   });
 });
 
