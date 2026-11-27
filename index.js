@@ -34,7 +34,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || config.PORT || 3000);
 
-const VERSION = '6.3.7';
+const VERSION = '6.3.8';
 const ALLOWED_CURRENCIES = ['USD'];
 
 const ALLOWED_BUDGETS = [20];

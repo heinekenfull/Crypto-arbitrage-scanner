@@ -797,11 +797,14 @@ async function fetchOrderBookRest(exchange, symbol) {
   }
 
   const exchangeId = String(exchange.id || 'unknown').toLowerCase();
-  const cooldownUntil = orderBookExchangeCooldown.get(exchangeId) || 0;
+  // Cooldown por mercado, não por corretora inteira: uma falha em um par
+  // não deve bloquear os livros de todos os outros símbolos da exchange.
+  const cooldownKey = exchangeId + '::' + symbol;
+  const cooldownUntil = orderBookExchangeCooldown.get(cooldownKey) || 0;
   if (cooldownUntil > Date.now()) {
-    throw new Error('Livro temporariamente suspenso para ' + exchangeId + ' após falha de rede; nova tentativa no próximo ciclo.');
+    throw new Error('Livro de ' + symbol + ' temporariamente suspenso em ' + exchangeId + ' após falha de rede; nova tentativa após o cooldown.');
   }
-  if (cooldownUntil) orderBookExchangeCooldown.delete(exchangeId);
+  if (cooldownUntil) orderBookExchangeCooldown.delete(cooldownKey);
 
   const depth = getOrderBookLimit(exchangeId);
   const configuredTimeout = number(exchange.timeout, ORDERBOOK_REQUEST_TIMEOUT_MS);
@@ -828,7 +831,7 @@ async function fetchOrderBookRest(exchange, symbol) {
         await new Promise(resolve => setTimeout(resolve, ORDERBOOK_RETRY_DELAY_MS));
         continue;
       }
-      orderBookExchangeCooldown.set(exchangeId, Date.now() + ORDERBOOK_NETWORK_COOLDOWN_MS);
+      orderBookExchangeCooldown.set(cooldownKey, Date.now() + ORDERBOOK_NETWORK_COOLDOWN_MS);
       throw error;
     }
   }
@@ -1203,7 +1206,7 @@ async function scanMarket(onProgress = null) {
       const preliminary = {
         success: true,
         market: 'spot',
-        version: '6.3.6',
+        version: '6.3.8',
         phase: 'validating',
         isPreliminary: true,
         timestamp: Date.now(),
@@ -1270,6 +1273,69 @@ async function scanMarket(onProgress = null) {
 
     const evaluated = [];
 
+    const publishValidationProgress = () => {
+      if (typeof onProgress !== 'function') return;
+      const completedKeys = new Set(evaluated.map(item =>
+        [item.symbol, item.buyExchangeId, item.sellExchangeId].join('|')
+      ));
+      const pending = selectedCandidates
+        .filter(item => !completedKeys.has(
+          [item.symbol, item.buyExchangeId, item.sellExchangeId].join('|')
+        ))
+        .map(item => ({
+          ...item,
+          status: 'preliminary',
+          isPreliminary: true,
+          simulations: [],
+          validatedBudgets: [],
+          validatedBudgetsUSD: [],
+          validatedBudgetsBRL: []
+        }));
+      const completed = evaluated.filter(Boolean).map(item => ({
+        ...item,
+        isPreliminary: false
+      }));
+      const rejected = completed
+        .filter(item => item.validationError)
+        .map(item => ({
+          symbol: item.symbol,
+          buyExchangeId: item.buyExchangeId,
+          sellExchangeId: item.sellExchangeId,
+          reason: item.validationError
+        }));
+      try {
+        onProgress({
+          success: true,
+          market: 'spot',
+          version: '6.3.8',
+          phase: 'validating',
+          isPreliminary: false,
+          timestamp: Date.now(),
+          lastUpdated: Date.now(),
+          exchanges: exchangeResults,
+          exchangesConnected: exchangeResults.filter(item => item.connected).length,
+          marketsAnalyzed,
+          candidatesFound: totalCandidatesFound,
+          candidatesValidated: completed.length,
+          validatedOpportunities: completed.filter(item => item.status === 'validated').length,
+          opportunities: [...completed, ...pending],
+          diagnostics: {
+            phase: 'validating',
+            enabledExchanges: exchangeIds.length,
+            connectedExchanges: exchangeResults.filter(item => item.connected).length,
+            candidateCount: totalCandidatesFound,
+            candidatesChecked: completed.length,
+            validationErrors: rejected.length,
+            validationConcurrency: VALIDATION_CONCURRENCY,
+            rejected
+          },
+          durationMs: Date.now() - startedAt
+        });
+      } catch (progressError) {
+        console.warn('[SCAN] Não foi possível publicar progresso de livros:', progressError.message);
+      }
+    };
+
     for (const group of candidateGroups.values()) {
       const groupStartedAt = Date.now();
       console.log(
@@ -1324,15 +1390,30 @@ async function scanMarket(onProgress = null) {
           }
         );
         evaluated.push(...groupResults);
+
+        publishValidationProgress();
       } catch (error) {
+        const groupError = 'Falha ao preparar/consultar livros em ' +
+          group[0].buyExchangeId + ' ↔ ' + group[0].sellExchangeId +
+          ': ' + (error.message || String(error));
         for (const opportunity of group) {
           evaluated.push({
-            error: error.message || String(error),
-            symbol: opportunity.symbol,
-            buyExchangeId: opportunity.buyExchangeId,
-            sellExchangeId: opportunity.sellExchangeId
+            ...opportunity,
+            status: 'not_validated',
+            isPreliminary: false,
+            validationError: groupError,
+            orderBookValidation: {
+              valid: false,
+              synchronized: false,
+              reason: groupError
+            },
+            simulations: [],
+            validatedBudgets: [],
+            validatedBudgetsUSD: [],
+            validatedBudgetsBRL: []
           });
         }
+        publishValidationProgress();
       } finally {
         await closeExchangeMap(pairInstances);
         console.log(
@@ -1378,7 +1459,7 @@ async function scanMarket(onProgress = null) {
     return {
       success: true,
       market: 'spot',
-      version: '6.3.6',
+      version: '6.3.8',
       phase: 'complete',
       isPreliminary: false,
 
