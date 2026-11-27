@@ -712,8 +712,11 @@ function calculateOpportunities(priceCollections) {
 // ==========================================
 
 const orderBookExchangeCooldown = new Map();
-const ORDERBOOK_NETWORK_COOLDOWN_MS = 45000;
-const ORDERBOOK_RETRY_DELAY_MS = 700;
+const orderBookCache = new Map();
+const orderBookInflight = new Map();
+const ORDERBOOK_CACHE_TTL_MS = 650;
+const ORDERBOOK_NETWORK_COOLDOWN_MS = 20000;
+const ORDERBOOK_RETRY_DELAY_MS = 180;
 
 function isTransientOrderBookError(error) {
   const details = [error?.message, error?.stack, error?.cause?.message, error?.cause?.stack]
@@ -741,28 +744,51 @@ function getOrderBookLimit(exchangeId) {
 }
 
 async function fetchOrderBook(exchange, symbol) {
-  // Feed pública WebSocket da OKX: usa o snapshot mais recente do livro
-  // e mantém REST como fallback obrigatório em falhas/desconexões.
-  if (
-    String(exchange?.id || '').toLowerCase() === 'okx' &&
-    config.OKX_ORDERBOOK_WS_ENABLED !== false
-  ) {
-    try {
-      const wsBook = await getOkxOrderBook(
-        symbol,
-        Math.min(2500, ORDERBOOK_REQUEST_TIMEOUT_MS)
-      );
-      if (wsBook && Array.isArray(wsBook.bids) && Array.isArray(wsBook.asks)) {
-        console.log('[ORDERBOOK] OKX ' + symbol + ' via WebSocket.');
-        return wsBook;
-      }
-    } catch (wsError) {
-      console.warn('[ORDERBOOK] OKX WS indisponível para ' + symbol +
-        '; fallback REST: ' + (wsError.message || String(wsError)));
-    }
+  const exchangeId = String(exchange?.id || 'unknown').toLowerCase();
+  const cacheKey = exchangeId + '::' + symbol;
+  const now = Date.now();
+  const cached = orderBookCache.get(cacheKey);
+  if (cached && now - cached.receivedAt <= ORDERBOOK_CACHE_TTL_MS) {
+    return cached.book;
   }
 
-  return fetchOrderBookRest(exchange, symbol);
+  // Evita duas chamadas simultâneas ao mesmo endpoint/símbolo dentro do ciclo.
+  const inflight = orderBookInflight.get(cacheKey);
+  if (inflight) return inflight;
+
+  const request = (async () => {
+    let book = null;
+    // OKX WS é o caminho preferencial; o snapshot tem validação de frescor
+    // depois da captura. REST continua fallback para não travar a varredura.
+    if (exchangeId === 'okx' && config.OKX_ORDERBOOK_WS_ENABLED !== false) {
+      try {
+        book = await getOkxOrderBook(symbol, Math.min(1800, ORDERBOOK_REQUEST_TIMEOUT_MS));
+      } catch (_) {
+        // Fallback direto, sem aguardar uma segunda rodada do WS.
+      }
+    }
+    if (!book) book = await fetchOrderBookRest(exchange, symbol);
+    if (!book || !Array.isArray(book.bids) || !Array.isArray(book.asks)) {
+      throw new Error('Livro retornado sem arrays de bids/asks.');
+    }
+    const receivedAt = number(book._receivedAt, Date.now());
+    const normalized = { ...book, _receivedAt: receivedAt };
+    orderBookCache.set(cacheKey, { book: normalized, receivedAt: Date.now() });
+    if (orderBookCache.size > 600) {
+      for (const [key, entry] of orderBookCache) {
+        if (Date.now() - entry.receivedAt > ORDERBOOK_CACHE_TTL_MS * 3) orderBookCache.delete(key);
+        if (orderBookCache.size <= 450) break;
+      }
+    }
+    return normalized;
+  })();
+
+  orderBookInflight.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    if (orderBookInflight.get(cacheKey) === request) orderBookInflight.delete(cacheKey);
+  }
 }
 
 async function fetchOrderBookRest(exchange, symbol) {
@@ -790,19 +816,19 @@ async function fetchOrderBookRest(exchange, symbol) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const orderBook = await exchange.fetchOrderBook(symbol, depth);
-      if (!orderBook || typeof orderBook !== 'object') {
-        throw new Error('A corretora retornou um livro de ofertas inválido.');
+      if (!orderBook || typeof orderBook !== 'object' ||
+          !Array.isArray(orderBook.bids) || !Array.isArray(orderBook.asks) ||
+          !orderBook.bids.length || !orderBook.asks.length) {
+        throw new Error('A corretora retornou um livro vazio ou inválido.');
       }
       return { ...orderBook, _receivedAt: Date.now() };
     } catch (error) {
       if (!isTransientOrderBookError(error)) throw error;
       if (attempt === 0) {
-        console.warn('[ORDERBOOK] Falha transitória em ' + exchangeId + ' ' + symbol + '; repetindo uma vez.');
         await new Promise(resolve => setTimeout(resolve, ORDERBOOK_RETRY_DELAY_MS));
         continue;
       }
       orderBookExchangeCooldown.set(exchangeId, Date.now() + ORDERBOOK_NETWORK_COOLDOWN_MS);
-      console.warn('[ORDERBOOK] ' + exchangeId + ' entrou em cooldown por ' + ORDERBOOK_NETWORK_COOLDOWN_MS + 'ms após falha de rede.');
       throw error;
     }
   }
@@ -1266,41 +1292,38 @@ async function scanMarket(onProgress = null) {
           pairInstances.set(exchangeId, exchange);
         }
 
-        for (const opportunity of group) {
-          try {
-            evaluated.push(await evaluateCandidate(
-              opportunity,
-              conversionGraph,
-              pairInstances
-            ));
-          } catch (error) {
-            const validationError = error.message || String(error);
-            evaluated.push({
-              symbol: opportunity.symbol,
-              base: opportunity.base,
-              quote: opportunity.quote,
-              buyExchangeId: opportunity.buyExchangeId,
-              sellExchangeId: opportunity.sellExchangeId,
-              buyExchange: opportunity.buyExchange,
-              sellExchange: opportunity.sellExchange,
-              buyPrice: opportunity.buyPrice,
-              sellPrice: opportunity.sellPrice,
-              grossSpreadPercent: opportunity.grossSpreadPercent,
-              estimatedNetPercent: opportunity.estimatedNetPercent,
-              status: 'not_validated',
-              validationError,
-              orderBookValidation: {
-                valid: false,
-                synchronized: false,
-                reason: validationError
-              },
-              simulations: [],
-              validatedBudgets: [],
-              validatedBudgetsUSD: [],
-              validatedBudgetsBRL: []
-            });
+        const groupResults = await mapWithConcurrency(
+          group,
+          VALIDATION_CONCURRENCY,
+          async opportunity => {
+            try {
+              return await evaluateCandidate(opportunity, conversionGraph, pairInstances);
+            } catch (error) {
+              const validationError = error.message || String(error);
+              return {
+                symbol: opportunity.symbol,
+                base: opportunity.base,
+                quote: opportunity.quote,
+                buyExchangeId: opportunity.buyExchangeId,
+                sellExchangeId: opportunity.sellExchangeId,
+                buyExchange: opportunity.buyExchange,
+                sellExchange: opportunity.sellExchange,
+                buyPrice: opportunity.buyPrice,
+                sellPrice: opportunity.sellPrice,
+                grossSpreadPercent: opportunity.grossSpreadPercent,
+                estimatedNetPercent: opportunity.estimatedNetPercent,
+                status: 'not_validated',
+                validationError,
+                orderBookValidation: { valid: false, synchronized: false, reason: validationError },
+                simulations: [],
+                validatedBudgets: [],
+                validatedBudgetsUSD: [],
+                validatedBudgetsBRL: []
+              };
+            }
           }
-        }
+        );
+        evaluated.push(...groupResults);
       } catch (error) {
         for (const opportunity of group) {
           evaluated.push({
