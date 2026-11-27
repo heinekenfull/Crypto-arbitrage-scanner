@@ -1273,6 +1273,69 @@ async function scanMarket(onProgress = null) {
 
     const evaluated = [];
 
+    const publishValidationProgress = () => {
+      if (typeof onProgress !== 'function') return;
+      const completedKeys = new Set(evaluated.map(item =>
+        [item.symbol, item.buyExchangeId, item.sellExchangeId].join('|')
+      ));
+      const pending = selectedCandidates
+        .filter(item => !completedKeys.has(
+          [item.symbol, item.buyExchangeId, item.sellExchangeId].join('|')
+        ))
+        .map(item => ({
+          ...item,
+          status: 'preliminary',
+          isPreliminary: true,
+          simulations: [],
+          validatedBudgets: [],
+          validatedBudgetsUSD: [],
+          validatedBudgetsBRL: []
+        }));
+      const completed = evaluated.filter(Boolean).map(item => ({
+        ...item,
+        isPreliminary: false
+      }));
+      const rejected = completed
+        .filter(item => item.validationError)
+        .map(item => ({
+          symbol: item.symbol,
+          buyExchangeId: item.buyExchangeId,
+          sellExchangeId: item.sellExchangeId,
+          reason: item.validationError
+        }));
+      try {
+        onProgress({
+          success: true,
+          market: 'spot',
+          version: '6.3.8',
+          phase: 'validating',
+          isPreliminary: false,
+          timestamp: Date.now(),
+          lastUpdated: Date.now(),
+          exchanges: exchangeResults,
+          exchangesConnected: exchangeResults.filter(item => item.connected).length,
+          marketsAnalyzed,
+          candidatesFound: totalCandidatesFound,
+          candidatesValidated: completed.length,
+          validatedOpportunities: completed.filter(item => item.status === 'validated').length,
+          opportunities: [...completed, ...pending],
+          diagnostics: {
+            phase: 'validating',
+            enabledExchanges: exchangeIds.length,
+            connectedExchanges: exchangeResults.filter(item => item.connected).length,
+            candidateCount: totalCandidatesFound,
+            candidatesChecked: completed.length,
+            validationErrors: rejected.length,
+            validationConcurrency: VALIDATION_CONCURRENCY,
+            rejected
+          },
+          durationMs: Date.now() - startedAt
+        });
+      } catch (progressError) {
+        console.warn('[SCAN] Não foi possível publicar progresso de livros:', progressError.message);
+      }
+    };
+
     for (const group of candidateGroups.values()) {
       const groupStartedAt = Date.now();
       console.log(
@@ -1328,69 +1391,7 @@ async function scanMarket(onProgress = null) {
         );
         evaluated.push(...groupResults);
 
-        // Publica cada grupo concluído em vez de deixar o painel parado
-        // na prévia inicial durante toda a validação do ciclo.
-        if (typeof onProgress === 'function') {
-          const completedKeys = new Set(evaluated.map(item =>
-            [item.symbol, item.buyExchangeId, item.sellExchangeId].join('|')
-          ));
-          const pending = selectedCandidates
-            .filter(item => !completedKeys.has(
-              [item.symbol, item.buyExchangeId, item.sellExchangeId].join('|')
-            ))
-            .map(item => ({
-              ...item,
-              status: 'preliminary',
-              isPreliminary: true,
-              simulations: [],
-              validatedBudgets: [],
-              validatedBudgetsUSD: [],
-              validatedBudgetsBRL: []
-            }));
-          const completed = evaluated.filter(Boolean).map(item => ({
-            ...item,
-            isPreliminary: false
-          }));
-          const progressRejected = completed
-            .filter(item => item.validationError)
-            .map(item => ({
-              symbol: item.symbol,
-              buyExchangeId: item.buyExchangeId,
-              sellExchangeId: item.sellExchangeId,
-              reason: item.validationError
-            }));
-          try {
-            onProgress({
-              success: true,
-              market: 'spot',
-              version: '6.3.8',
-              phase: 'validating',
-              isPreliminary: false,
-              timestamp: Date.now(),
-              lastUpdated: Date.now(),
-              exchanges: exchangeResults,
-              exchangesConnected: exchangeResults.filter(item => item.connected).length,
-              marketsAnalyzed,
-              candidatesFound: totalCandidatesFound,
-              candidatesValidated: completed.length,
-              validatedOpportunities: completed.filter(item => item.status === 'validated').length,
-              opportunities: [...completed, ...pending],
-              diagnostics: {
-                phase: 'validating',
-                enabledExchanges: exchangeIds.length,
-                connectedExchanges: exchangeResults.filter(item => item.connected).length,
-                candidateCount: totalCandidatesFound,
-                candidatesChecked: completed.length,
-                validationErrors: progressRejected.length,
-                validationConcurrency: VALIDATION_CONCURRENCY,
-                rejected: progressRejected
-              },
-              durationMs: Date.now() - startedAt
-            });
-          } catch (progressError) {
-            console.warn('[SCAN] Não foi possível publicar progresso de livros:', progressError.message);
-          }
-        }
+        publishValidationProgress();
       } catch (error) {
         const groupError = 'Falha ao preparar/consultar livros em ' +
           group[0].buyExchangeId + ' ↔ ' + group[0].sellExchangeId +
@@ -1412,6 +1413,7 @@ async function scanMarket(onProgress = null) {
             validatedBudgetsBRL: []
           });
         }
+        publishValidationProgress();
       } finally {
         await closeExchangeMap(pairInstances);
         console.log(
